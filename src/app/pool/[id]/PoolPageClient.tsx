@@ -1,0 +1,550 @@
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { QRCodeSVG } from "qrcode.react";
+
+interface PoolData {
+  id: string;
+  title: string;
+  description: string | null;
+  targetSats: number;
+  fiatCurrency: string;
+  vendorLnAddress: string;
+  status: string;
+  releasePreimage: string | null;
+  collectedSats: number;
+  contributorCount: number;
+  progress: number;
+  targetFiat: string;
+  collectedFiat: string;
+  createdAt: string;
+  expiresAt: string;
+  contributions: Array<{
+    id: string;
+    nickname: string;
+    amountSats: number;
+    receiptId: string | null;
+    createdAt: string;
+  }>;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    OPEN: "bg-blue-100 text-blue-800",
+    FUNDED: "bg-yellow-100 text-yellow-800",
+    RELEASED: "bg-green-100 text-green-800",
+    REFUNDED: "bg-gray-100 text-gray-800",
+  };
+  const labels: Record<string, string> = {
+    OPEN: "⏳ Accepting Contributions",
+    FUNDED: "✅ Fully Funded — Ready to Release",
+    RELEASED: "🎉 Funds Sent to Vendor",
+    REFUNDED: "↩️ Refunded",
+  };
+  return (
+    <span
+      className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${colors[status] || "bg-gray-100"}`}
+    >
+      {labels[status] || status}
+    </span>
+  );
+}
+
+function ContributeModal({
+  poolId,
+  onClose,
+  onContributed,
+}: {
+  poolId: string;
+  onClose: () => void;
+  onContributed: () => void;
+}) {
+  const [step, setStep] = useState<"form" | "pay" | "success">("form");
+  const [nickname, setNickname] = useState("");
+  const [amountSats, setAmountSats] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Payment state
+  const [bolt11, setBolt11] = useState("");
+  const [paymentHash, setPaymentHash] = useState("");
+  const [preimage, setPreimage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const handleContribute = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      const amount = parseInt(amountSats, 10);
+      if (!amount || amount < 100) {
+        throw new Error("Minimum contribution is 100 sats");
+      }
+
+      const res = await fetch(`/api/pools/${poolId}/contribute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: nickname.trim(), amountSats: amount }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create payment");
+
+      setBolt11(data.bolt11);
+      setPaymentHash(data.paymentHash);
+      setStep("pay");
+
+      // Start polling for payment
+      pollRef.current = setInterval(async () => {
+        try {
+          const verifyRes = await fetch(`/api/pools/${poolId}/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paymentHash: data.paymentHash }),
+          });
+          const verifyData = await verifyRes.json();
+
+          if (verifyData.settled) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setPreimage(verifyData.preimage);
+            setStep("success");
+            onContributed();
+          }
+        } catch {
+          // Silently retry
+        }
+      }, 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }, [poolId, nickname, amountSats, onContributed]);
+
+  const copyToClipboard = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(bolt11);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      const textarea = document.createElement("textarea");
+      textarea.value = bolt11;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [bolt11]);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold">
+            {step === "form" && "Contribute Your Share"}
+            {step === "pay" && "Complete Payment"}
+            {step === "success" && "Payment Confirmed! ✅"}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Step: Form */}
+        {step === "form" && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Your Nickname
+              </label>
+              <input
+                type="text"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                placeholder="e.g., Chinedu"
+                className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                maxLength={30}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Amount (sats)
+              </label>
+              <input
+                type="number"
+                value={amountSats}
+                onChange={(e) => setAmountSats(e.target.value)}
+                placeholder="e.g., 5000"
+                className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                min={100}
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleContribute}
+              disabled={loading || !nickname.trim() || !amountSats}
+              className="w-full bg-[var(--primary)] hover:bg-[var(--primary-dark)] disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-base transition-colors min-h-[44px]"
+            >
+              {loading ? "Creating Payment..." : "⚡ Generate Payment Code"}
+            </button>
+          </div>
+        )}
+
+        {/* Step: Pay */}
+        {step === "pay" && (
+          <div className="space-y-4 text-center">
+            <p className="text-sm text-[var(--muted)]">
+              Scan this code with any Lightning wallet to pay
+            </p>
+
+            {/* QR Code */}
+            <div className="flex justify-center">
+              <div className="bg-white p-3 rounded-xl border border-[var(--border)] inline-block">
+                <QRCodeSVG
+                  value={bolt11}
+                  size={220}
+                  level="M"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
+              </div>
+            </div>
+
+            {/* Copy button */}
+            <button
+              onClick={copyToClipboard}
+              className="w-full border border-[var(--border)] rounded-lg py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors min-h-[44px]"
+            >
+              {copied ? "✅ Copied!" : "📋 Tap to Copy Payment Code"}
+            </button>
+
+            {/* Polling indicator */}
+            <div className="flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
+              <div className="w-2 h-2 bg-[var(--primary)] rounded-full animate-pulse" />
+              Waiting for payment...
+            </div>
+          </div>
+        )}
+
+        {/* Step: Success */}
+        {step === "success" && (
+          <div className="space-y-4 text-center">
+            <div className="text-5xl mb-2">🎉</div>
+            <p className="text-lg font-semibold text-[var(--success)]">
+              Payment Verified!
+            </p>
+            <p className="text-sm text-[var(--muted)]">
+              Your contribution of{" "}
+              <strong>{parseInt(amountSats).toLocaleString()} sats</strong> has
+              been confirmed.
+            </p>
+            {preimage && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-left">
+                <p className="text-xs font-semibold text-green-800 mb-1">
+                  Verified Receipt ID
+                </p>
+                <p className="text-xs font-mono text-green-700 break-all">
+                  {preimage}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={onClose}
+              className="w-full bg-[var(--success)] hover:opacity-90 text-white font-semibold py-3 rounded-xl text-base transition-opacity min-h-[44px]"
+            >
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReleasePanel({
+  pool,
+  onReleased,
+}: {
+  pool: PoolData;
+  onReleased: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRelease = useCallback(async () => {
+    if (
+      !confirm(
+        `Release ${pool.collectedSats.toLocaleString()} sats to ${pool.vendorLnAddress}?`
+      )
+    ) {
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/api/pools/${pool.id}/release`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to release funds");
+
+      onReleased();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }, [pool, onReleased]);
+
+  return (
+    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
+      <h3 className="font-bold text-lg mb-2">💰 Escrow Release</h3>
+      <p className="text-sm text-[var(--muted)] mb-4">
+        The pool is fully funded! Release{" "}
+        <strong>{pool.collectedSats.toLocaleString()} sats</strong> (
+        {pool.collectedFiat}) to the vendor at{" "}
+        <strong>{pool.vendorLnAddress}</strong>.
+      </p>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+          {error}
+        </div>
+      )}
+
+      <button
+        onClick={handleRelease}
+        disabled={loading}
+        className="w-full bg-[var(--warning)] hover:opacity-90 disabled:opacity-50 text-black font-bold py-3 rounded-xl text-base transition-opacity min-h-[44px]"
+      >
+        {loading
+          ? "Releasing Funds..."
+          : `⚡ Send Funds to Vendor (${pool.collectedSats.toLocaleString()} sats)`}
+      </button>
+    </div>
+  );
+}
+
+function ProofOfPayment({ pool }: { pool: PoolData }) {
+  return (
+    <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+      <h3 className="font-bold text-lg mb-2 text-green-800">
+        🔐 Cryptographic Proof of Payment
+      </h3>
+      <p className="text-sm text-[var(--muted)] mb-4">
+        Funds have been released. Every group member can independently verify
+        this payout.
+      </p>
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold text-green-700 mb-1">
+            Vendor Address
+          </p>
+          <p className="text-sm font-mono bg-white/50 rounded-lg px-3 py-2 break-all">
+            {pool.vendorLnAddress}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-green-700 mb-1">
+            Settlement Proof (Preimage)
+          </p>
+          <p className="text-xs font-mono bg-white/50 rounded-lg px-3 py-2 break-all text-green-800">
+            {pool.releasePreimage}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-green-700 mb-1">
+            Total Released
+          </p>
+          <p className="text-sm font-semibold">
+            {pool.collectedSats.toLocaleString()} sats ({pool.collectedFiat})
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function PoolPageClient({
+  initialPool,
+}: {
+  initialPool: PoolData;
+}) {
+  const [pool, setPool] = useState<PoolData>(initialPool);
+  const [showContribute, setShowContribute] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+
+  useEffect(() => {
+    setShareUrl(window.location.href);
+  }, []);
+
+  const refreshPool = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/pools/${pool.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPool(data);
+      }
+    } catch {
+      // Silently fail
+    }
+  }, [pool.id]);
+
+  const copyShareUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      // Ignore
+    }
+  }, [shareUrl]);
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <h1 className="text-2xl font-bold">{pool.title}</h1>
+          <StatusBadge status={pool.status} />
+        </div>
+        {pool.description && (
+          <p className="text-[var(--muted)] text-sm">{pool.description}</p>
+        )}
+      </div>
+
+      {/* Progress Bar */}
+      <div className="bg-white border border-[var(--border)] rounded-xl p-5">
+        <div className="flex justify-between text-sm mb-2">
+          <span className="font-semibold">
+            {pool.collectedSats.toLocaleString()} /{" "}
+            {pool.targetSats.toLocaleString()} sats
+          </span>
+          <span className="font-bold text-[var(--primary)]">
+            {pool.progress}%
+          </span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden mb-2">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${
+              pool.progress >= 100
+                ? "bg-[var(--success)]"
+                : "bg-[var(--primary)]"
+            }`}
+            style={{ width: `${pool.progress}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-xs text-[var(--muted)]">
+          <span>{pool.collectedFiat}</span>
+          <span>{pool.targetFiat}</span>
+        </div>
+        <div className="flex items-center justify-between mt-3 text-xs text-[var(--muted)]">
+          <span>👥 {pool.contributorCount} contributors</span>
+          <span>⚡ {pool.vendorLnAddress}</span>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex gap-3">
+        {pool.status === "OPEN" && (
+          <button
+            onClick={() => setShowContribute(true)}
+            className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-dark)] text-white font-semibold py-3 rounded-xl text-base transition-colors min-h-[44px]"
+          >
+            ⚡ Contribute Your Share
+          </button>
+        )}
+        <button
+          onClick={copyShareUrl}
+          className="border border-[var(--border)] rounded-xl px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors min-h-[44px]"
+        >
+          {shareCopied ? "✅ Link Copied!" : "📤 Share"}
+        </button>
+      </div>
+
+      {/* Escrow Release / Proof */}
+      {pool.status === "FUNDED" && (
+        <ReleasePanel pool={pool} onReleased={refreshPool} />
+      )}
+      {pool.status === "RELEASED" && pool.releasePreimage && (
+        <ProofOfPayment pool={pool} />
+      )}
+
+      {/* Contributors Ledger */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Contributors</h2>
+        {pool.contributions.length === 0 ? (
+          <div className="text-center py-8 text-[var(--muted)] text-sm border border-dashed border-[var(--border)] rounded-xl">
+            No contributions yet. Be the first!
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {pool.contributions.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between border border-[var(--border)] rounded-lg px-4 py-3 bg-white"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">✅</span>
+                  <div>
+                    <p className="font-medium text-sm">{c.nickname}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {new Date(c.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-sm">
+                    {c.amountSats.toLocaleString()} sats
+                  </p>
+                  {c.receiptId && (
+                    <p className="text-xs text-[var(--muted)] font-mono">
+                      ID: {c.receiptId}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Contribute Modal */}
+      {showContribute && (
+        <ContributeModal
+          poolId={pool.id}
+          onClose={() => setShowContribute(false)}
+          onContributed={refreshPool}
+        />
+      )}
+    </div>
+  );
+}

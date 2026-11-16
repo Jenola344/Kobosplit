@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Pool {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  targetSats      Int
+  fiatCurrency    String   @default("NGN")
+  vendorLnAddress String
+  status          String   @default("OPEN") // OPEN | FUNDED | RELEASED | REFUNDED
+  encryptedNwcUri String
+  releasePreimage String?
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+
+  contributions Contribution[]
+}
+
+model Contribution {
+  id          String   @id @default(cuid())
+  poolId      String
+  nickname    String
+  amountSats  Int
+  paymentHash String   @unique
+  bolt11      String
+  preimage    String?
+  status      String   @default("PENDING") // PENDING | PAID | REFUNDED
+  createdAt   DateTime @default(now())
+
+  pool Pool @relation(fields: [poolId], references: [id])
+}
