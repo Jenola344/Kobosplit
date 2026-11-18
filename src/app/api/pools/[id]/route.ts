@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { satsToFiat } from "@/lib/rates";
+import { getRateInfo, satsToFiat } from "@/lib/rates";
 
 export async function GET(
   _request: Request,
@@ -36,9 +36,10 @@ export async function GET(
     );
 
     const currency = pool.fiatCurrency as "NGN" | "XOF";
-    const [targetFiat, collectedFiat] = await Promise.all([
+    const [targetFiat, collectedFiat, rateInfo] = await Promise.all([
       satsToFiat(pool.targetSats, currency),
       satsToFiat(collectedSats, currency),
+      getRateInfo(currency),
     ]);
 
     const symbol = currency === "NGN" ? "₦" : "CFA ";
@@ -52,6 +53,9 @@ export async function GET(
       vendorLnAddress: pool.vendorLnAddress,
       status: pool.status,
       releasePreimage: pool.releasePreimage,
+      // Tells the organizer UI whether a stuck release can be proven (invoice
+      // recorded) or merely handed back (nothing was paid).
+      payoutInvoiceRecorded: Boolean(pool.releasePaymentHash),
       collectedSats,
       contributorCount: pool.contributions.length,
       progress: Math.min(
@@ -60,6 +64,7 @@ export async function GET(
       ),
       targetFiat: `${symbol}${targetFiat.toLocaleString()}`,
       collectedFiat: `${symbol}${collectedFiat.toLocaleString()}`,
+      rateIsFallback: rateInfo.isFallback,
       createdAt: pool.createdAt.toISOString(),
       expiresAt: pool.expiresAt.toISOString(),
       contributions: pool.contributions.map((c) => ({

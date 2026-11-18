@@ -12,11 +12,13 @@ interface PoolData {
   vendorLnAddress: string;
   status: string;
   releasePreimage: string | null;
+  payoutInvoiceRecorded: boolean;
   collectedSats: number;
   contributorCount: number;
   progress: number;
   targetFiat: string;
   collectedFiat: string;
+  rateIsFallback: boolean;
   createdAt: string;
   expiresAt: string;
   contributions: Array<{
@@ -32,12 +34,14 @@ function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     OPEN: "bg-blue-100 text-blue-800",
     FUNDED: "bg-yellow-100 text-yellow-800",
+    RELEASING: "bg-yellow-100 text-yellow-800 animate-pulse",
     RELEASED: "bg-green-100 text-green-800",
     REFUNDED: "bg-gray-100 text-gray-800",
   };
   const labels: Record<string, string> = {
     OPEN: "⏳ Accepting Contributions",
     FUNDED: "✅ Fully Funded — Ready to Release",
+    RELEASING: "⏳ Releasing Funds to Vendor…",
     RELEASED: "🎉 Funds Sent to Vendor",
     REFUNDED: "↩️ Refunded",
   };
@@ -283,6 +287,122 @@ function ContributeModal({
   );
 }
 
+function ReconcilePanel({
+  pool,
+  onSettled,
+}: {
+  pool: PoolData;
+  onSettled: () => void;
+}) {
+  const [organizerToken, setOrganizerToken] = useState("");
+  const [preimage, setPreimage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`kobosplit:organizer:${pool.id}`);
+      if (saved) setOrganizerToken(saved);
+    } catch {
+      // storage unavailable — the organizer can paste the key
+    }
+  }, [pool.id]);
+
+  const handleReconcile = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      setLoading(true);
+
+      try {
+        const res = await fetch(`/api/pools/${pool.id}/reconcile`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            organizerToken: organizerToken.trim(),
+            // Only sent when a vendor invoice was recorded; otherwise the claim
+            // is simply handed back because nothing can have been paid.
+            ...(pool.payoutInvoiceRecorded ? { preimage: preimage.trim() } : {}),
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not reconcile this payout");
+
+        onSettled();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [pool.id, organizerToken, preimage, onSettled]
+  );
+
+  return (
+    <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
+      <h3 className="font-bold text-lg mb-2">⏳ Payout started — needs reconciling</h3>
+      <p className="text-sm text-[var(--muted)] mb-4">
+        {pool.payoutInvoiceRecorded
+          ? "A release was started for this pool but never recorded. If your wallet shows the vendor payment as completed, paste its preimage below to settle the pool and publish the receipt. The proof is checked against the invoice recorded before payment, so a wrong preimage is rejected."
+          : "A release was claimed for this pool, but no vendor invoice was ever recorded — which means nothing was paid. Release the claim to put the pool back to Fully Funded so you can run the release again."}
+      </p>
+
+      <form onSubmit={handleReconcile} className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium mb-1">Organizer key</label>
+          <input
+            type="password"
+            value={organizerToken}
+            onChange={(e) => setOrganizerToken(e.target.value)}
+            placeholder="Your organizer key"
+            className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] font-mono"
+            autoComplete="off"
+          />
+        </div>
+
+        {pool.payoutInvoiceRecorded && (
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Payout preimage
+            </label>
+            <input
+              type="text"
+              value={preimage}
+              onChange={(e) => setPreimage(e.target.value)}
+              placeholder="64 hex characters from your wallet"
+              className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] font-mono text-xs"
+              autoComplete="off"
+            />
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={
+            loading ||
+            !organizerToken.trim() ||
+            (pool.payoutInvoiceRecorded && !preimage.trim())
+          }
+          className="w-full bg-[var(--warning)] hover:opacity-90 disabled:opacity-50 text-black font-bold py-3 rounded-xl text-base transition-opacity min-h-[44px]"
+        >
+          {loading
+            ? "Recording Payout..."
+            : pool.payoutInvoiceRecorded
+              ? "Record Payout Proof"
+              : "Release Claim (nothing was paid)"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function ReleasePanel({
   pool,
   onReleased,
@@ -403,8 +523,22 @@ export default function PoolPageClient({
   const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
+    // The create page hands the organizer key over in the URL fragment, which is
+    // never sent to a server. Keep it on this device, then strip it from the
+    // address bar so it can't be shared along with the pool link by accident.
+    const hash = window.location.hash;
+    if (hash.startsWith("#organizer=")) {
+      const key = decodeURIComponent(hash.slice("#organizer=".length));
+      try {
+        window.localStorage.setItem(`kobosplit:organizer:${initialPool.id}`, key);
+      } catch {
+        // storage unavailable — the key stays in the fragment only
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
     setShareUrl(window.location.href);
-  }, []);
+  }, [initialPool.id]);
 
   const refreshPool = useCallback(async () => {
     try {
@@ -466,6 +600,11 @@ export default function PoolPageClient({
           <span>{pool.collectedFiat}</span>
           <span>{pool.targetFiat}</span>
         </div>
+        {pool.rateIsFallback && (
+          <p className="text-[11px] text-[var(--warning)] mt-1">
+            ⚠️ Estimated rate — live exchange rate unavailable, fiat amounts are approximate.
+          </p>
+        )}
         <div className="flex items-center justify-between mt-3 text-xs text-[var(--muted)]">
           <span>👥 {pool.contributorCount} contributors</span>
           <span>⚡ {pool.vendorLnAddress}</span>
@@ -489,6 +628,11 @@ export default function PoolPageClient({
           {shareCopied ? "✅ Link Copied!" : "📤 Share"}
         </button>
       </div>
+
+      {/* Reconciliation of a payout that was started but never recorded */}
+      {pool.status === "RELEASING" && (
+        <ReconcilePanel pool={pool} onSettled={refreshPool} />
+      )}
 
       {/* Escrow Release / Proof */}
       {pool.status === "FUNDED" && (

@@ -1,4 +1,4 @@
-import { nwc } from "@getalby/sdk";
+import { createWalletClient } from "./wallet";
 
 const NWC_TIMEOUT_MS = 15_000;
 
@@ -17,6 +17,29 @@ interface ReleaseResult {
   paidInvoice: string;
 }
 
+/** Values of LNURL_PROXY_URL that mean "do not use a proxy at all". */
+const PROXY_DISABLED_VALUES = new Set(["false", "off", "none", "direct"]);
+
+/**
+ * How to resolve a vendor Lightning Address:
+ *   unset            -> lightning-tools' default (Alby's public LNURL proxy)
+ *   "false"/"direct" -> resolve against the vendor's own domain, no third party
+ *   a URL            -> use that proxy
+ */
+export function getLightningAddressOptions(): { proxy?: string | false } | undefined {
+  const configured = process.env.LNURL_PROXY_URL?.trim();
+  if (!configured) return undefined;
+  if (PROXY_DISABLED_VALUES.has(configured.toLowerCase())) return { proxy: false };
+  return { proxy: configured };
+}
+
+function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(message)), NWC_TIMEOUT_MS)
+  );
+  return Promise.race([promise, timeout]);
+}
+
 /**
  * Create a Lightning invoice via NWC (NIP-47 makeInvoice).
  */
@@ -25,22 +48,16 @@ export async function createPoolInvoice(
   amountSats: number,
   memo: string
 ): Promise<InvoiceResult> {
-  const client = new nwc.NWCClient({ nostrWalletConnectUrl: nwcUrl });
+  const client = createWalletClient(nwcUrl);
 
   try {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("NWC makeInvoice timed out")),
-        NWC_TIMEOUT_MS
-      )
+    const result = await withTimeout(
+      client.makeInvoice({
+        amount: amountSats * 1000, // NWC expects millisats
+        description: memo,
+      }),
+      "NWC makeInvoice timed out"
     );
-
-    const invoicePromise = client.makeInvoice({
-      amount: amountSats * 1000, // NWC expects millisats
-      description: memo,
-    });
-
-    const result = await Promise.race([invoicePromise, timeoutPromise]);
 
     return {
       bolt11: result.invoice,
@@ -58,21 +75,13 @@ export async function checkInvoicePaid(
   nwcUrl: string,
   paymentHash: string
 ): Promise<PaymentStatus> {
-  const client = new nwc.NWCClient({ nostrWalletConnectUrl: nwcUrl });
+  const client = createWalletClient(nwcUrl);
 
   try {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("NWC lookupInvoice timed out")),
-        NWC_TIMEOUT_MS
-      )
+    const tx = await withTimeout(
+      client.lookupInvoice({ payment_hash: paymentHash }),
+      "NWC lookupInvoice timed out"
     );
-
-    const lookupPromise = client.lookupInvoice({
-      payment_hash: paymentHash,
-    });
-
-    const tx = await Promise.race([lookupPromise, timeoutPromise]);
 
     return {
       settled: Boolean(tx.settled_at),
@@ -84,18 +93,20 @@ export async function checkInvoicePaid(
 }
 
 /**
- * Release pool funds to vendor via LNURL-pay + NWC payInvoice.
+ * Resolve a vendor Lightning Address into an invoice (LNURL-pay). No money moves
+ * here, which is what lets the caller record the payment hash before paying.
  */
-export async function releasePoolFunds(
-  nwcUrl: string,
+export async function requestVendorInvoice(
   vendorLnAddress: string,
   amountSats: number,
   memo: string
-): Promise<ReleaseResult> {
+): Promise<{ paymentRequest: string; paymentHash: string }> {
   // Dynamically import lightning-tools (ESM)
   const { LightningAddress } = await import("@getalby/lightning-tools");
 
-  const ln = new LightningAddress(vendorLnAddress);
+  // LNURL_PROXY_URL points the resolver at the local mock wallet in tests, at
+  // your own proxy in production, or at the vendor's domain directly.
+  const ln = new LightningAddress(vendorLnAddress, getLightningAddressOptions());
   await ln.fetch();
 
   const invoice = await ln.requestInvoice({
@@ -103,27 +114,49 @@ export async function releasePoolFunds(
     comment: memo,
   });
 
-  const client = new nwc.NWCClient({ nostrWalletConnectUrl: nwcUrl });
+  if (!invoice.paymentHash) {
+    throw new Error("Vendor invoice did not include a payment hash");
+  }
+
+  return {
+    paymentRequest: invoice.paymentRequest,
+    paymentHash: invoice.paymentHash,
+  };
+}
+
+/**
+ * Pay an already-resolved invoice via NWC (NIP-47 payInvoice).
+ */
+export async function payVendorInvoice(
+  nwcUrl: string,
+  paymentRequest: string
+): Promise<{ preimage: string }> {
+  const client = createWalletClient(nwcUrl);
 
   try {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("NWC payInvoice timed out")),
-        NWC_TIMEOUT_MS
-      )
+    const res = await withTimeout(
+      client.payInvoice({ invoice: paymentRequest }),
+      "NWC payInvoice timed out"
     );
 
-    const payPromise = client.payInvoice({
-      invoice: invoice.paymentRequest,
-    });
-
-    const res = await Promise.race([payPromise, timeoutPromise]);
-
-    return {
-      preimage: res.preimage,
-      paidInvoice: invoice.paymentRequest,
-    };
+    return { preimage: res.preimage };
   } finally {
     client.close();
   }
+}
+
+/**
+ * Release pool funds to vendor via LNURL-pay + NWC payInvoice, in one call.
+ * Prefer requestVendorInvoice + payVendorInvoice where the hash must be recorded.
+ */
+export async function releasePoolFunds(
+  nwcUrl: string,
+  vendorLnAddress: string,
+  amountSats: number,
+  memo: string
+): Promise<ReleaseResult> {
+  const invoice = await requestVendorInvoice(vendorLnAddress, amountSats, memo);
+  const { preimage } = await payVendorInvoice(nwcUrl, invoice.paymentRequest);
+
+  return { preimage, paidInvoice: invoice.paymentRequest };
 }

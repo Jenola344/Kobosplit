@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { satsToFiat } from "@/lib/rates";
+import { getRateInfo, satsToFiat } from "@/lib/rates";
+
+// Pools change constantly; always render from the database, never a build-time snapshot.
+export const dynamic = "force-dynamic";
 
 interface PoolWithContributions {
   id: string;
@@ -31,12 +34,14 @@ function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     OPEN: "bg-blue-100 text-blue-800",
     FUNDED: "bg-yellow-100 text-yellow-800",
+    RELEASING: "bg-yellow-100 text-yellow-800",
     RELEASED: "bg-green-100 text-green-800",
     REFUNDED: "bg-gray-100 text-gray-800",
   };
   const labels: Record<string, string> = {
     OPEN: "Accepting Contributions",
     FUNDED: "Fully Funded — Ready to Release",
+    RELEASING: "Releasing Funds to Vendor…",
     RELEASED: "Funds Sent to Vendor ✓",
     REFUNDED: "Refunded",
   };
@@ -129,7 +134,7 @@ async function PoolCard({ pool }: { pool: PoolWithContributions }) {
 }
 
 export default async function HomePage() {
-  const pools = await getPools();
+  const [pools, rates] = await Promise.all([getPools(), getRateInfo("NGN")]);
 
   return (
     <div>
@@ -153,6 +158,11 @@ export default async function HomePage() {
       {/* Pool list */}
       <section>
         <h2 className="text-xl font-semibold mb-4">Active Pools</h2>
+        {rates.isFallback && (
+          <p className="text-xs text-[var(--warning)] mb-3">
+            ⚠️ Live exchange rate unavailable — NGN and XOF amounts below are built-in estimates.
+          </p>
+        )}
         {pools.length === 0 ? (
           <div className="text-center py-12 text-[var(--muted)]">
             <p className="text-lg mb-2">No pools yet</p>

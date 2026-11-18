@@ -69,6 +69,9 @@ cp .env.example .env
 Edit `.env`:
 - `ENCRYPTION_SECRET` — Already set with a dev key. Generate a production key: `openssl rand -hex 32`
 - `DEMO_NWC_URI` — *(Optional but recommended)* Paste a testnet NWC URI from [Alby Hub](https://nwc.getalby.com) for 1-click demo mode.
+- `LNURL_PROXY_URL` — *(Optional)* How vendor Lightning Addresses resolve. Leave unset for Alby's public proxy, set to `"false"` to resolve directly against each vendor's own domain, or point it at your own proxy URL.
+
+Fiat amounts are labelled "estimated rate" whenever the live exchange rate could not be fetched, so stale fallback numbers are never presented as live market prices.
 
 ### 3. Initialize Database & Seed
 
@@ -93,6 +96,60 @@ Set `DEMO_NWC_URI` in `.env`, then:
 ```bash
 npx tsx scripts/test-nwc.ts
 ```
+
+## 🧪 Local Mock Wallet Harness (no wallet needed)
+
+The whole money lifecycle — invoice → settlement → LNURL-pay release — runs without a Lightning wallet, Nostr relay or internet access.
+
+```bash
+npm run e2e
+```
+
+That single command starts a mock wallet on `:3102` and its own app server on `:3100` against a throwaway `prisma/harness.db`, then drives the full end-to-end suite through the real HTTP API. Your demo data in `prisma/dev.db` is never touched.
+
+**What the harness verifies**
+
+- Create pool with the demo wallet, then contribute → a real BOLT11 invoice with the amount and payment hash the API reported.
+- `lookupInvoice` refuses to settle an unpaid invoice, then confirms it once paid and locks the preimage onto the ledger.
+- Partial funding keeps the pool `OPEN`; reaching the target flips it to `FUNDED`.
+- Release resolves the vendor Lightning Address, pays the LNURL-pay invoice, and stores a release preimage that hashes (sha256) to the vendor invoice's payment hash.
+- Double release, contributions after release, and release before funding are all refused.
+- Two release requests fired simultaneously: the conditional `FUNDED → RELEASING` claim lets exactly one pay the vendor, and the loser is refused with `409` while the payout is still in flight (`MOCK_PAY_DELAY_MS` makes that window deterministic).
+- The harness delays (`MOCK_PAY_DELAY_MS`, `MOCK_LNURL_DELAY_MS`) apply only to the mock's `slow@blink.sv` vendor, which just the concurrency and stale-claim pools use — the rest of the suite runs at full speed.
+- A failed payout rolls the claim back to `FUNDED` so the organizer can retry, and no receipt is stored.
+- A crash between "vendor paid" and "receipt written" (reproduced directly in the database) is recovered with the organizer key: a stranger's key is refused, a mismatched preimage is refused, the real preimage settles the pool, and the reconciled pool can never pay again.
+- A crash between "claim taken" and "vendor invoice recorded" is not a dead end: because the invoice hash is written before paying, its absence proves nothing was paid, so the organizer key hands the claim back to `FUNDED` and a fresh release runs. Reconciling an `OPEN` or already `RELEASED` pool is refused.
+- Every claim carries its own id and all post-claim writes are conditioned on it, so a release that was cancelled by a reconcile-abandon cannot record a hash or pay even if a retry has already re-claimed the pool. The harness drives exactly that interleaving (`MOCK_LNURL_DELAY_MS` holds the stale request inside its window) and asserts one payout, a `409` for the stale request and a `200` for the retry.
+- A vendor whose LNURL `maxSendable` is below the collected amount is rejected *before* any payment is attempted, and the pool stays `FUNDED`.
+- Nicknames with markup, malformed vendor addresses, and verifying another pool's payment hash are rejected.
+- Neither the NWC URI nor its ciphertext ever appears in an API response.
+
+**What is mocked** — the NIP-47 wallet itself (`makeInvoice` / `lookupInvoice` / `payInvoice`, so no relay is involved) and the LNURL-pay proxy that resolves the vendor address. Everything above that seam is the real app: route handlers, Zod validation, rate limiting, Prisma state transitions, AES-256-GCM decryption, `@getalby/lightning-tools` LNURL parsing and real BOLT11 decoding. Mock invoices are structurally valid but unsigned and must never leave your machine.
+
+### Driving a demo in the browser
+
+The mock wallet can settle contribution invoices on a timer, so the QR → polling flow completes by itself on stage — no wallet to scan.
+
+```bash
+# terminal 1 — mock wallet, auto-settling contributions after 6s
+MOCK_AUTO_SETTLE_MS=6000 npm run mock:wallet
+
+# terminal 2 — app pointed at the mock wallet
+NWC_MOCK=1 \
+MOCK_WALLET_URL=http://127.0.0.1:3101 \
+LNURL_PROXY_URL=http://127.0.0.1:3101/lnurl \
+DEMO_NWC_URI='nostr+walletconnect://mock?relay=wss://mock.relay.local&secret=demo' \
+npm run dev
+```
+
+Then tick **🧪 Use Demo Testnet Wallet** when creating a pool. With `MOCK_AUTO_SETTLE_MS` unset, settlement is manual instead:
+
+```bash
+npm run mock:pay        # pay the most recent unpaid contribution
+npm run mock:pay -- <paymentHash>
+```
+
+`NWC_MOCK=1` throws in a production build, so a real deployment can never fake a payout.
 
 ## 📁 Project Structure
 

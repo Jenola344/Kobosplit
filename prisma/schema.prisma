@@ -14,8 +14,18 @@ model Pool {
   targetSats      Int
   fiatCurrency    String   @default("NGN")
   vendorLnAddress String
-  status          String   @default("OPEN") // OPEN | FUNDED | RELEASED | REFUNDED
+  status          String   @default("OPEN") // OPEN | FUNDED | RELEASING | RELEASED | REFUNDED
   encryptedNwcUri String
+  // sha256 of the organizer key handed out once at creation. It is the only
+  // credential that can reconcile a payout left mid-flight by a crash.
+  organizerTokenHash String?
+  // Identifier of the release attempt that currently owns the claim. Every write
+  // after claiming is conditioned on it, so a request whose claim was handed
+  // back can never record a hash or pay — even if a retry re-claims the pool.
+  releaseClaimId String?
+  // Payment hash of the vendor invoice we are paying. Written BEFORE paying so a
+  // crash after the money leaves can still be proven and settled.
+  releasePaymentHash String?
   releasePreimage String?
   createdAt       DateTime @default(now())
   expiresAt       DateTime

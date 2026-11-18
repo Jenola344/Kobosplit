@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { satsToFiat } from "@/lib/rates";
+import { getRateInfo, satsToFiat } from "@/lib/rates";
 import PoolPageClient from "./PoolPageClient";
+
+// Contributions land while the page is shared; always serve fresh ledger data.
+export const dynamic = "force-dynamic";
 
 async function getPoolData(id: string) {
   const pool = await prisma.pool.findUnique({
@@ -33,11 +36,13 @@ async function getPoolData(id: string) {
 
   let targetFiat: number;
   let collectedFiat: number;
+  let rateIsFallback = true;
   try {
     [targetFiat, collectedFiat] = await Promise.all([
       satsToFiat(pool.targetSats, currency),
       satsToFiat(collectedSats, currency),
     ]);
+    rateIsFallback = (await getRateInfo(currency)).isFallback;
   } catch {
     targetFiat = 0;
     collectedFiat = 0;
@@ -52,6 +57,7 @@ async function getPoolData(id: string) {
     vendorLnAddress: pool.vendorLnAddress,
     status: pool.status,
     releasePreimage: pool.releasePreimage,
+    payoutInvoiceRecorded: Boolean(pool.releasePaymentHash),
     collectedSats,
     contributorCount: pool.contributions.length,
     progress: Math.min(
@@ -60,6 +66,7 @@ async function getPoolData(id: string) {
     ),
     targetFiat: `${symbol}${targetFiat.toLocaleString()}`,
     collectedFiat: `${symbol}${collectedFiat.toLocaleString()}`,
+    rateIsFallback,
     createdAt: pool.createdAt.toISOString(),
     expiresAt: pool.expiresAt.toISOString(),
     contributions: pool.contributions.map((c) => ({

@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "mock:wallet": "tsx harness/mock-wallet.ts",
+    "mock:pay": "tsx harness/pay.ts",
+    "e2e": "tsx harness/e2e.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -26,6 +29,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.0.0",
     "postcss": "^8.0.0",

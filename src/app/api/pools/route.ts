@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { encryptNwcUri } from "@/lib/crypto";
+import { encryptNwcUri, generateOrganizerToken, sha256Hex } from "@/lib/crypto";
 import { createPoolSchema } from "@/lib/security";
 import { checkRateLimit } from "@/lib/security";
 
@@ -115,6 +115,9 @@ export async function POST(request: Request) {
     // Encrypt NWC URI before storing
     const encryptedUri = encryptNwcUri(rawNwcUri);
 
+    // Handed back to the organizer exactly once; only its hash is stored
+    const organizerToken = generateOrganizerToken();
+
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
     const pool = await prisma.pool.create({
@@ -125,6 +128,7 @@ export async function POST(request: Request) {
         fiatCurrency,
         vendorLnAddress,
         encryptedNwcUri: encryptedUri,
+        organizerTokenHash: sha256Hex(organizerToken),
         expiresAt,
       },
     });
@@ -139,6 +143,8 @@ export async function POST(request: Request) {
         vendorLnAddress: pool.vendorLnAddress,
         createdAt: pool.createdAt.toISOString(),
         expiresAt: pool.expiresAt.toISOString(),
+        // Returned once, never retrievable afterwards
+        organizerToken,
       },
       { status: 201 }
     );

@@ -20,6 +20,36 @@ function getKey(): Buffer {
 }
 
 /**
+ * Organizer key: a bearer token handed out once when a pool is created. Only its
+ * sha256 is stored, so the database never contains the credential itself.
+ */
+export function generateOrganizerToken(): string {
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+/** sha256 of a UTF-8 string (used for organizer keys). */
+export function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/** sha256 of a preimage's raw bytes (used to verify Lightning payout proofs). */
+export function sha256Preimage(preimageHex: string): string {
+  return crypto.createHash("sha256").update(Buffer.from(preimageHex, "hex")).digest("hex");
+}
+
+/** Constant-time comparison of a presented organizer key against the stored hash. */
+export function verifyOrganizerToken(
+  token: string,
+  storedHash: string | null | undefined
+): boolean {
+  if (!token || !storedHash) return false;
+  const candidate = Buffer.from(sha256Hex(token), "hex");
+  const expected = Buffer.from(storedHash, "hex");
+  if (expected.length !== candidate.length) return false;
+  return crypto.timingSafeEqual(candidate, expected);
+}
+
+/**
  * Encrypt an NWC URI using AES-256-GCM.
  * Output format: ivHex:authTagHex:cipherTextHex
  * Raw URIs are NEVER logged.

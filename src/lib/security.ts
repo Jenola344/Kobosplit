@@ -51,6 +51,19 @@ export const verifySchema = z.object({
     .regex(/^[a-fA-F0-9]+$/, "Invalid payment hash format"),
 });
 
+export const reconcileSchema = z.object({
+  organizerToken: z
+    .string()
+    .min(16, "Organizer key is required")
+    .max(200, "Organizer key is too long"),
+  // Required only when a vendor invoice was recorded before the crash; omitted
+  // when the organizer is handing back a claim under which nothing was paid.
+  preimage: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, "Payout preimage must be 32 bytes of hex")
+    .optional(),
+});
+
 export const releaseSchema = z.object({
   confirm: z.literal(true, {
     errorMap: () => ({ message: "You must confirm the release" }),

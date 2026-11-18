@@ -7,18 +7,23 @@ interface RateCache {
   btcToNgn: number;
   btcToXof: number;
   fetchedAt: number;
+  /** True when these numbers are the built-in estimates, not the live market rate. */
+  isFallback: boolean;
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Safe static fallback rates (approximate market rates)
-const FALLBACK_RATES: RateCache = {
+const FALLBACK_RATES = {
   btcToNgn: 120_000_000, // ~₦120M per BTC
   btcToXof: 45_000_000, // ~45M XOF per BTC
-  fetchedAt: 0,
 };
 
-let rateCache: RateCache = { ...FALLBACK_RATES };
+let rateCache: RateCache = {
+  ...FALLBACK_RATES,
+  fetchedAt: 0,
+  isFallback: true,
+};
 
 const SATS_PER_BTC = 100_000_000;
 
@@ -34,10 +39,11 @@ async function fetchRates(): Promise<RateCache> {
       btcToNgn: data.bitcoin.ngn ?? FALLBACK_RATES.btcToNgn,
       btcToXof: data.bitcoin.xof ?? FALLBACK_RATES.btcToXof,
       fetchedAt: Date.now(),
+      isFallback: false,
     };
   } catch {
-    // Return fallback silently — never block UI
-    return { ...FALLBACK_RATES, fetchedAt: Date.now() };
+    // Return fallback silently — never block UI, but never pretend it is live either
+    return { ...FALLBACK_RATES, fetchedAt: Date.now(), isFallback: true };
   }
 }
 
@@ -75,7 +81,8 @@ export async function fiatToSats(
 }
 
 /**
- * Get current rate info for display.
+ * Get current rate info for display, including whether the live rate was
+ * actually reachable (so the UI can label fiat amounts as estimates).
  */
 export async function getRateInfo(currency: "NGN" | "XOF") {
   const rates = await getCachedRates();
@@ -87,7 +94,8 @@ export async function getRateInfo(currency: "NGN" | "XOF") {
     symbol,
     oneSatFiat: Math.round(oneSatFiat * 10000) / 10000,
     ratePerBtc: rate,
-    isFallback: rates.fetchedAt === 0,
+    isFallback: rates.isFallback,
+    fetchedAt: rates.fetchedAt > 0 ? new Date(rates.fetchedAt).toISOString() : null,
   };
 }
 

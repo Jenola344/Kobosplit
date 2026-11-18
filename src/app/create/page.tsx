@@ -20,6 +20,7 @@ export default function CreatePoolPage() {
 
   // Converted amount display
   const [convertedDisplay, setConvertedDisplay] = useState("");
+  const [rateIsFallback, setRateIsFallback] = useState(false);
 
   const symbol = fiatCurrency === "NGN" ? "₦" : "CFA ";
 
@@ -28,6 +29,7 @@ export default function CreatePoolPage() {
     const amount = parseFloat(amountInput);
     if (!amount || amount <= 0) {
       setConvertedDisplay("");
+      setRateIsFallback(false);
       return;
     }
 
@@ -39,6 +41,7 @@ export default function CreatePoolPage() {
     fetch(`/api/rates?${param}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
+        setRateIsFallback(Boolean(data.isFallback));
         if (isFiatMode) {
           setConvertedDisplay(`≈ ${data.sats?.toLocaleString() ?? "?"} sats`);
         } else {
@@ -101,7 +104,14 @@ export default function CreatePoolPage() {
           throw new Error(data.error || "Failed to create pool");
         }
 
-        router.push(`/pool/${data.id}`);
+        // The organizer key can only reconcile a payout stuck mid-release. Hand
+        // it to the pool page through the URL fragment (never sent to a server,
+        // never logged) so the device that created the pool keeps it.
+        router.push(
+          data.organizerToken
+            ? `/pool/${data.id}#organizer=${encodeURIComponent(data.organizerToken)}`
+            : `/pool/${data.id}`
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
@@ -211,7 +221,12 @@ export default function CreatePoolPage() {
             </span>
           </div>
           {convertedDisplay && (
-            <p className="text-xs text-[var(--muted)] mt-1">{convertedDisplay}</p>
+            <p className="text-xs text-[var(--muted)] mt-1">
+              {convertedDisplay}
+              {rateIsFallback && (
+                <span className="text-[var(--warning)]"> · estimated rate</span>
+              )}
+            </p>
           )}
         </div>
 
@@ -290,6 +305,11 @@ export default function CreatePoolPage() {
         >
           {loading ? "Creating Pool..." : "⚡ Create Split Pool"}
         </button>
+
+        <p className="text-xs text-[var(--muted)] text-center">
+          An organizer key is created with the pool and kept on this device. It is
+          the only way to record a payout if a release is interrupted.
+        </p>
       </form>
     </div>
   );
