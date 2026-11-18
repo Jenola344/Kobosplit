@@ -3,6 +3,23 @@ import crypto from "crypto";
 
 const prisma = new PrismaClient();
 
+/**
+ * Seed contributions need real proofs: sha256(preimage) must equal paymentHash,
+ * otherwise every receipt on the demo pools would (correctly) fail the audit
+ * check shown in the UI.
+ */
+function seedProof(seed: string): { preimage: string; paymentHash: string } {
+  const preimage = crypto
+    .createHash("sha256")
+    .update(`kobosplit-seed-preimage:${seed}`)
+    .digest("hex");
+  const paymentHash = crypto
+    .createHash("sha256")
+    .update(Buffer.from(preimage, "hex"))
+    .digest("hex");
+  return { preimage, paymentHash };
+}
+
 // Replicate encryption logic for seed data
 function encryptNwcUri(plainUri: string): string {
   const secret = process.env.ENCRYPTION_SECRET;
@@ -28,6 +45,14 @@ async function main() {
 
   const encryptedUri = encryptNwcUri(demoNwcUri);
 
+  // Rebuild the demo ledger from scratch so old placeholder proofs can't linger.
+  const removed = await prisma.contribution.deleteMany({
+    where: { id: { startsWith: "seed-contrib-" } },
+  });
+  if (removed.count > 0) {
+    console.log(`🧹 Removed ${removed.count} stale seed contributions`);
+  }
+
   // ── Pool 1: Nigerian Campus Generator Fuel Split ──
   const pool1 = await prisma.pool.upsert({
     where: { id: "seed-pool-lagos-001" },
@@ -47,32 +72,30 @@ async function main() {
   });
 
   // Add 2 settled contributions for Pool 1 (15,000 of 25,000 sats)
-  await prisma.contribution.upsert({
-    where: { paymentHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" },
-    update: {},
-    create: {
+  const chinedu = seedProof("chinedu-8000");
+  await prisma.contribution.create({
+    data: {
       id: "seed-contrib-001",
       poolId: pool1.id,
       nickname: "Chinedu",
       amountSats: 8000,
-      paymentHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      paymentHash: chinedu.paymentHash,
       bolt11: "lnbc80u1pjseedexample1",
-      preimage: "e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8",
+      preimage: chinedu.preimage,
       status: "PAID",
     },
   });
 
-  await prisma.contribution.upsert({
-    where: { paymentHash: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3" },
-    update: {},
-    create: {
+  const amina = seedProof("amina-7000");
+  await prisma.contribution.create({
+    data: {
       id: "seed-contrib-002",
       poolId: pool1.id,
       nickname: "Amina",
       amountSats: 7000,
-      paymentHash: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+      paymentHash: amina.paymentHash,
       bolt11: "lnbc70u1pjseedexample2",
-      preimage: "f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+      preimage: amina.preimage,
       status: "PAID",
     },
   });
@@ -99,26 +122,23 @@ async function main() {
 
   // Add 4 settled contributions for Pool 2 (totaling 40,000 sats = fully funded)
   const pool2Contribs = [
-    { id: "seed-contrib-003", nickname: "Fatou", amountSats: 12000, hashSuffix: "c3d4", preimgSuffix: "a9b0" },
-    { id: "seed-contrib-004", nickname: "Moussa", amountSats: 10000, hashSuffix: "d4e5", preimgSuffix: "b0c1" },
-    { id: "seed-contrib-005", nickname: "Awa", amountSats: 10000, hashSuffix: "e5f6", preimgSuffix: "c1d2" },
-    { id: "seed-contrib-006", nickname: "Ibrahima", amountSats: 8000, hashSuffix: "f6a1", preimgSuffix: "d2e3" },
+    { id: "seed-contrib-003", nickname: "Fatou", amountSats: 12000 },
+    { id: "seed-contrib-004", nickname: "Moussa", amountSats: 10000 },
+    { id: "seed-contrib-005", nickname: "Awa", amountSats: 10000 },
+    { id: "seed-contrib-006", nickname: "Ibrahima", amountSats: 8000 },
   ];
 
   for (const c of pool2Contribs) {
-    const paymentHash = `${c.hashSuffix}e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6`;
-    const preimage = `${c.preimgSuffix}c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2`;
-    await prisma.contribution.upsert({
-      where: { paymentHash },
-      update: {},
-      create: {
+    const proof = seedProof(`${c.id.toLowerCase()}-${c.amountSats}`);
+    await prisma.contribution.create({
+      data: {
         id: c.id,
         poolId: pool2.id,
         nickname: c.nickname,
         amountSats: c.amountSats,
-        paymentHash,
+        paymentHash: proof.paymentHash,
         bolt11: `lnbc${c.amountSats}u1pjseedexample${c.id}`,
-        preimage,
+        preimage: proof.preimage,
         status: "PAID",
       },
     });

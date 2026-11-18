@@ -14,31 +14,63 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-        <header className="border-b border-[var(--border)] bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="/" className="flex items-center gap-2 font-bold text-xl">
-              <span className="text-2xl">⚡</span>
-              <span>
+      <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)] antialiased">
+        {/* Animated backdrop: drifting aurora orbs, panning grid, sparks, grain. */}
+        <div className="site-bg" aria-hidden="true">
+          <div className="orb orb-a" />
+          <div className="orb orb-b" />
+          <div className="orb orb-c" />
+          <div className="grid-layer" />
+          <div className="sparks">
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="grain" />
+        </div>
+
+        <header className="site-header sticky top-0 z-50">
+          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+            <a href="/" className="group flex items-center gap-2 text-xl font-bold">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--primary)]/15 text-xl ring-1 ring-[var(--primary)]/30 transition-transform duration-300 group-hover:scale-110">
+                ⚡
+              </span>
+              <span className="tracking-tight">
                 Kobo<span className="text-[var(--primary)]">Split</span>
               </span>
             </a>
-            <a
-              href="/create"
-              className="bg-[var(--primary)] hover:bg-[var(--primary-dark)] text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors min-h-[44px] flex items-center"
-            >
-              + New Split
-            </a>
+            <nav className="flex items-center gap-2">
+              <a
+                href="/"
+                className="hidden rounded-lg px-3 py-2 text-sm text-[var(--muted)] transition-colors hover:text-[var(--foreground)] sm:block"
+              >
+                Pools
+              </a>
+              <a href="/create" className="btn btn-primary min-h-[44px] px-4 py-2 text-sm">
+                + New Split
+              </a>
+            </nav>
           </div>
         </header>
-        <main className="max-w-4xl mx-auto px-4 py-6">{children}</main>
-        <footer className="border-t border-[var(--border)] mt-12">
-          <div className="max-w-4xl mx-auto px-4 py-6 text-center text-sm text-[var(--muted)]">
-            Built for{" "}
-            <strong className="text-[var(--foreground)]">
-              Dakar Bitcoin Hack by BTrust
-            </strong>{" "}
-            · Non-custodial · Open Source
+
+        <main className="relative z-10 mx-auto max-w-4xl px-4 py-8">{children}</main>
+
+        <footer className="relative z-10 mt-16 border-t border-[var(--border)]">
+          <div className="mx-auto flex max-w-4xl flex-col items-center gap-2 px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p>
+              Built for{" "}
+              <strong className="text-[var(--foreground)]">
+                Dakar Bitcoin Hack by BTrust
+              </strong>
+            </p>
+            <p className="flex items-center gap-2 text-xs">
+              <span className="pulse-dot" />
+              Non-custodial · Lightning Network · Open Source
+            </p>
           </div>
         </footer>
       </body>

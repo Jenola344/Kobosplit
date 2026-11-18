@@ -34,10 +34,15 @@ export function getLightningAddressOptions(): { proxy?: string | false } | undef
 }
 
 function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(message)), NWC_TIMEOUT_MS)
-  );
-  return Promise.race([promise, timeout]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), NWC_TIMEOUT_MS);
+  });
+  // Clear the timer on both outcomes so a fast call doesn't pin the event loop
+  // for the rest of the timeout window.
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /**
@@ -107,12 +112,18 @@ export async function requestVendorInvoice(
   // LNURL_PROXY_URL points the resolver at the local mock wallet in tests, at
   // your own proxy in production, or at the vendor's domain directly.
   const ln = new LightningAddress(vendorLnAddress, getLightningAddressOptions());
-  await ln.fetch();
 
-  const invoice = await ln.requestInvoice({
-    satoshi: amountSats,
-    comment: memo,
-  });
+  // A vendor's LNURL server can hang just like a relay can, and this call sits
+  // in front of the payout, so it gets the same deadline as every NWC call.
+  await withTimeout(ln.fetch(), "Vendor LNURL lookup timed out");
+
+  const invoice = await withTimeout(
+    ln.requestInvoice({
+      satoshi: amountSats,
+      comment: memo,
+    }),
+    "Vendor invoice request timed out"
+  );
 
   if (!invoice.paymentHash) {
     throw new Error("Vendor invoice did not include a payment hash");

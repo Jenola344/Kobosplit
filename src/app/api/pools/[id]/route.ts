@@ -19,6 +19,7 @@ export async function GET(
             id: true,
             nickname: true,
             amountSats: true,
+            paymentHash: true,
             preimage: true,
             createdAt: true,
           },
@@ -71,7 +72,8 @@ export async function GET(
         id: c.id,
         nickname: c.nickname,
         amountSats: c.amountSats,
-        receiptId: c.preimage ? c.preimage.slice(0, 12) + "..." : null,
+        paymentHash: c.paymentHash,
+        preimage: c.preimage,
         createdAt: c.createdAt.toISOString(),
       })),
     });

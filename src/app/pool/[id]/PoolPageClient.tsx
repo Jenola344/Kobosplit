@@ -25,18 +25,153 @@ interface PoolData {
     id: string;
     nickname: string;
     amountSats: number;
-    receiptId: string | null;
+    paymentHash: string;
+    preimage: string | null;
     createdAt: string;
   }>;
 }
 
+type ReceiptCheck = "checking" | "match" | "mismatch" | "unavailable";
+
+/**
+ * sha256(preimage) in the browser, so "verified" is something a visitor can
+ * re-derive instead of taking on trust.
+ */
+async function checkPreimage(
+  preimage: string,
+  paymentHash: string
+): Promise<ReceiptCheck> {
+  try {
+    const pairs = preimage.trim().match(/.{2}/g) ?? [];
+    const bytes = Uint8Array.from(pairs, (pair) => parseInt(pair, 16));
+    if (bytes.length === 0) return "mismatch";
+
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("");
+
+    return hex === paymentHash.trim().toLowerCase() ? "match" : "mismatch";
+  } catch {
+    return "unavailable";
+  }
+}
+
+function ReceiptProof({
+  preimage,
+  paymentHash,
+  defaultOpen = false,
+}: {
+  preimage: string;
+  paymentHash: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [copied, setCopied] = useState(false);
+  const [check, setCheck] = useState<ReceiptCheck>("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    setCheck("checking");
+    checkPreimage(preimage, paymentHash).then((result) => {
+      if (!cancelled) setCheck(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preimage, paymentHash]);
+
+  const copyPreimage = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(preimage);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked — the preimage is selectable, so it can still be copied.
+    }
+  }, [preimage]);
+
+  const chip =
+    check === "match"
+      ? "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30"
+      : check === "mismatch"
+        ? "bg-amber-400/10 text-amber-300 ring-amber-400/30"
+        : "bg-white/5 text-[var(--muted)] ring-white/15";
+
+  const label =
+    check === "match"
+      ? "Receipt verified"
+      : check === "mismatch"
+        ? "Receipt unverified"
+        : "Receipt";
+
+  return (
+    <div className={defaultOpen ? "text-left" : "text-right"}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 transition-colors hover:brightness-125 ${chip}`}
+      >
+        <span aria-hidden="true">
+          {check === "match" ? "✓" : check === "mismatch" ? "⚠" : "•"}
+        </span>
+        {label}
+        <span aria-hidden="true" className="opacity-60">
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="animate-rise mt-2 space-y-2 rounded-xl border border-[var(--border)] bg-black/30 p-3">
+          <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+            Payment preimage
+          </p>
+          <p className="select-all break-all font-mono text-[11px] leading-relaxed">
+            {preimage}
+          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p
+              className={`text-[11px] leading-snug ${
+                check === "match"
+                  ? "text-emerald-300"
+                  : check === "mismatch"
+                    ? "text-amber-300"
+                    : "text-[var(--muted)]"
+              }`}
+            >
+              {check === "match"
+                ? "SHA-256 of this preimage matches the invoice's payment hash."
+                : check === "mismatch"
+                  ? "SHA-256 of this preimage does not match the invoice's payment hash."
+                  : check === "unavailable"
+                    ? "This browser cannot compute SHA-256 here — verify the preimage in your wallet."
+                    : "Checking preimage…"}
+            </p>
+            <button
+              type="button"
+              onClick={copyPreimage}
+              className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="break-all font-mono text-[10px] text-[var(--muted)]">
+            invoice: {paymentHash}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    OPEN: "bg-blue-100 text-blue-800",
-    FUNDED: "bg-yellow-100 text-yellow-800",
-    RELEASING: "bg-yellow-100 text-yellow-800 animate-pulse",
-    RELEASED: "bg-green-100 text-green-800",
-    REFUNDED: "bg-gray-100 text-gray-800",
+    OPEN: "bg-sky-400/10 text-sky-300 ring-sky-400/30",
+    FUNDED: "bg-amber-400/10 text-amber-300 ring-amber-400/30",
+    RELEASING: "bg-amber-400/10 text-amber-300 ring-amber-400/30 animate-pulse",
+    RELEASED: "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30",
+    REFUNDED: "bg-white/5 text-[var(--muted)] ring-white/15",
   };
   const labels: Record<string, string> = {
     OPEN: "⏳ Accepting Contributions",
@@ -47,7 +182,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span
-      className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${colors[status] || "bg-gray-100"}`}
+      className={`inline-flex shrink-0 items-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ${colors[status] || "bg-white/5 text-[var(--muted)] ring-white/15"}`}
     >
       {labels[status] || status}
     </span>
@@ -153,8 +288,8 @@ function ContributeModal({
   }, [bolt11]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal-panel glass max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold">
@@ -164,7 +299,8 @@ function ContributeModal({
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            aria-label="Close"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-xl leading-none text-[var(--muted)] transition-colors hover:bg-white/10 hover:text-[var(--foreground)]"
           >
             ×
           </button>
@@ -182,7 +318,7 @@ function ContributeModal({
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 placeholder="e.g., Chinedu"
-                className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="field num"
                 maxLength={30}
               />
             </div>
@@ -195,13 +331,13 @@ function ContributeModal({
                 value={amountSats}
                 onChange={(e) => setAmountSats(e.target.value)}
                 placeholder="e.g., 5000"
-                className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="field num"
                 min={100}
               />
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+              <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                 {error}
               </div>
             )}
@@ -209,7 +345,7 @@ function ContributeModal({
             <button
               onClick={handleContribute}
               disabled={loading || !nickname.trim() || !amountSats}
-              className="w-full bg-[var(--primary)] hover:bg-[var(--primary-dark)] disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-base transition-colors min-h-[44px]"
+              className="btn btn-primary w-full text-base"
             >
               {loading ? "Creating Payment..." : "⚡ Generate Payment Code"}
             </button>
@@ -225,7 +361,7 @@ function ContributeModal({
 
             {/* QR Code */}
             <div className="flex justify-center">
-              <div className="bg-white p-3 rounded-xl border border-[var(--border)] inline-block">
+              <div className="inline-block rounded-xl bg-white p-3 shadow-[0_14px_44px_-16px_rgba(247,147,26,0.65)]">
                 <QRCodeSVG
                   value={bolt11}
                   size={220}
@@ -239,14 +375,14 @@ function ContributeModal({
             {/* Copy button */}
             <button
               onClick={copyToClipboard}
-              className="w-full border border-[var(--border)] rounded-lg py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors min-h-[44px]"
+              className="btn btn-ghost w-full text-sm"
             >
               {copied ? "✅ Copied!" : "📋 Tap to Copy Payment Code"}
             </button>
 
             {/* Polling indicator */}
             <div className="flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
-              <div className="w-2 h-2 bg-[var(--primary)] rounded-full animate-pulse" />
+              <span className="pulse-dot" />
               Waiting for payment...
             </div>
           </div>
@@ -265,18 +401,20 @@ function ContributeModal({
               been confirmed.
             </p>
             {preimage && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-left">
-                <p className="text-xs font-semibold text-green-800 mb-1">
-                  Verified Receipt ID
+              <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3">
+                <p className="mb-2 text-xs font-semibold text-emerald-300">
+                  Verified Receipt
                 </p>
-                <p className="text-xs font-mono text-green-700 break-all">
-                  {preimage}
-                </p>
+                <ReceiptProof
+                  preimage={preimage}
+                  paymentHash={paymentHash}
+                  defaultOpen
+                />
               </div>
             )}
             <button
               onClick={onClose}
-              className="w-full bg-[var(--success)] hover:opacity-90 text-white font-semibold py-3 rounded-xl text-base transition-opacity min-h-[44px]"
+              className="btn w-full bg-[var(--success)] text-base text-[#04211a] hover:brightness-110"
             >
               Done
             </button>
@@ -340,8 +478,10 @@ function ReconcilePanel({
   );
 
   return (
-    <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
-      <h3 className="font-bold text-lg mb-2">⏳ Payout started — needs reconciling</h3>
+    <div
+      className="animate-rise rounded-2xl border border-amber-400/35 bg-amber-400/[0.07] p-5 shadow-[0_20px_60px_-30px_rgba(251,191,36,0.5)]"
+    >
+      <h3 className="mb-2 text-lg font-bold text-amber-200">⏳ Payout started — needs reconciling</h3>
       <p className="text-sm text-[var(--muted)] mb-4">
         {pool.payoutInvoiceRecorded
           ? "A release was started for this pool but never recorded. If your wallet shows the vendor payment as completed, paste its preimage below to settle the pool and publish the receipt. The proof is checked against the invoice recorded before payment, so a wrong preimage is rejected."
@@ -356,7 +496,7 @@ function ReconcilePanel({
             value={organizerToken}
             onChange={(e) => setOrganizerToken(e.target.value)}
             placeholder="Your organizer key"
-            className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] font-mono"
+            className="field font-mono"
             autoComplete="off"
           />
         </div>
@@ -371,14 +511,14 @@ function ReconcilePanel({
               value={preimage}
               onChange={(e) => setPreimage(e.target.value)}
               placeholder="64 hex characters from your wallet"
-              className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] font-mono text-xs"
+              className="field font-mono text-xs"
               autoComplete="off"
             />
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {error}
           </div>
         )}
@@ -390,7 +530,7 @@ function ReconcilePanel({
             !organizerToken.trim() ||
             (pool.payoutInvoiceRecorded && !preimage.trim())
           }
-          className="w-full bg-[var(--warning)] hover:opacity-90 disabled:opacity-50 text-black font-bold py-3 rounded-xl text-base transition-opacity min-h-[44px]"
+          className="btn w-full bg-[var(--warning)] text-base text-[#241a00] hover:brightness-105"
         >
           {loading
             ? "Recording Payout..."
@@ -444,8 +584,8 @@ function ReleasePanel({
   }, [pool, onReleased]);
 
   return (
-    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
-      <h3 className="font-bold text-lg mb-2">💰 Escrow Release</h3>
+    <div className="animate-rise rounded-2xl border border-amber-400/30 bg-gradient-to-b from-amber-400/10 to-transparent p-5">
+      <h3 className="mb-2 text-lg font-bold text-amber-200">💰 Escrow Release</h3>
       <p className="text-sm text-[var(--muted)] mb-4">
         The pool is fully funded! Release{" "}
         <strong>{pool.collectedSats.toLocaleString()} sats</strong> (
@@ -454,7 +594,7 @@ function ReleasePanel({
       </p>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+        <div className="mb-4 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
         </div>
       )}
@@ -474,8 +614,8 @@ function ReleasePanel({
 
 function ProofOfPayment({ pool }: { pool: PoolData }) {
   return (
-    <div className="bg-green-50 border border-green-200 rounded-xl p-5">
-      <h3 className="font-bold text-lg mb-2 text-green-800">
+    <div className="animate-rise rounded-2xl border border-emerald-400/30 bg-emerald-400/[0.07] p-5">
+      <h3 className="mb-2 text-lg font-bold text-emerald-300">
         🔐 Cryptographic Proof of Payment
       </h3>
       <p className="text-sm text-[var(--muted)] mb-4">
@@ -484,23 +624,21 @@ function ProofOfPayment({ pool }: { pool: PoolData }) {
       </p>
       <div className="space-y-3">
         <div>
-          <p className="text-xs font-semibold text-green-700 mb-1">
-            Vendor Address
-          </p>
-          <p className="text-sm font-mono bg-white/50 rounded-lg px-3 py-2 break-all">
+          <p className="mb-1 text-xs font-semibold text-emerald-400">Vendor Address</p>
+          <p className="break-all rounded-lg bg-black/30 px-3 py-2 font-mono text-sm">
             {pool.vendorLnAddress}
           </p>
         </div>
         <div>
-          <p className="text-xs font-semibold text-green-700 mb-1">
+          <p className="mb-1 text-xs font-semibold text-emerald-400">
             Settlement Proof (Preimage)
           </p>
-          <p className="text-xs font-mono bg-white/50 rounded-lg px-3 py-2 break-all text-green-800">
+          <p className="break-all rounded-lg bg-black/30 px-3 py-2 font-mono text-xs text-emerald-200">
             {pool.releasePreimage}
           </p>
         </div>
         <div>
-          <p className="text-xs font-semibold text-green-700 mb-1">
+          <p className="mb-1 text-xs font-semibold text-emerald-400">
             Total Released
           </p>
           <p className="text-sm font-semibold">
@@ -563,11 +701,13 @@ export default function PoolPageClient({
   }, [shareUrl]);
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       {/* Header */}
-      <div>
-        <div className="flex items-start justify-between gap-4 mb-3">
-          <h1 className="text-2xl font-bold">{pool.title}</h1>
+      <div className="animate-rise">
+        <div className="mb-2 flex flex-col-reverse items-start gap-2 sm:flex-row sm:justify-between sm:gap-4">
+          <h1 className="text-2xl font-extrabold tracking-tight text-balance sm:text-3xl">
+            {pool.title}
+          </h1>
           <StatusBadge status={pool.status} />
         </div>
         {pool.description && (
@@ -576,8 +716,8 @@ export default function PoolPageClient({
       </div>
 
       {/* Progress Bar */}
-      <div className="bg-white border border-[var(--border)] rounded-xl p-5">
-        <div className="flex justify-between text-sm mb-2">
+      <div className="card animate-rise p-5" style={{ animationDelay: "80ms" }}>
+        <div className="mb-2 flex justify-between text-sm">
           <span className="font-semibold">
             {pool.collectedSats.toLocaleString()} /{" "}
             {pool.targetSats.toLocaleString()} sats
@@ -586,13 +726,9 @@ export default function PoolPageClient({
             {pool.progress}%
           </span>
         </div>
-        <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden mb-2">
+        <div className="track track-lg mb-2">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              pool.progress >= 100
-                ? "bg-[var(--success)]"
-                : "bg-[var(--primary)]"
-            }`}
+            className={`fill ${pool.progress >= 100 ? "fill-done" : ""}`}
             style={{ width: `${pool.progress}%` }}
           />
         </div>
@@ -616,14 +752,14 @@ export default function PoolPageClient({
         {pool.status === "OPEN" && (
           <button
             onClick={() => setShowContribute(true)}
-            className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-dark)] text-white font-semibold py-3 rounded-xl text-base transition-colors min-h-[44px]"
+            className="btn btn-primary flex-1 text-base"
           >
             ⚡ Contribute Your Share
           </button>
         )}
         <button
           onClick={copyShareUrl}
-          className="border border-[var(--border)] rounded-xl px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors min-h-[44px]"
+          className="btn btn-ghost text-sm"
         >
           {shareCopied ? "✅ Link Copied!" : "📤 Share"}
         </button>
@@ -646,7 +782,7 @@ export default function PoolPageClient({
       <div>
         <h2 className="text-lg font-semibold mb-3">Contributors</h2>
         {pool.contributions.length === 0 ? (
-          <div className="text-center py-8 text-[var(--muted)] text-sm border border-dashed border-[var(--border)] rounded-xl">
+          <div className="rounded-2xl border border-dashed border-[var(--border)] bg-white/[0.02] py-10 text-center text-sm text-[var(--muted)]">
             No contributions yet. Be the first!
           </div>
         ) : (
@@ -654,7 +790,7 @@ export default function PoolPageClient({
             {pool.contributions.map((c) => (
               <div
                 key={c.id}
-                className="flex items-center justify-between border border-[var(--border)] rounded-lg px-4 py-3 bg-white"
+                className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-white/[0.035] px-4 py-3 transition-colors hover:bg-white/[0.06]"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-lg">✅</span>
@@ -669,10 +805,13 @@ export default function PoolPageClient({
                   <p className="font-semibold text-sm">
                     {c.amountSats.toLocaleString()} sats
                   </p>
-                  {c.receiptId && (
-                    <p className="text-xs text-[var(--muted)] font-mono">
-                      ID: {c.receiptId}
-                    </p>
+                  {c.preimage && (
+                    <div className="mt-1">
+                      <ReceiptProof
+                        preimage={c.preimage}
+                        paymentHash={c.paymentHash}
+                      />
+                    </div>
                   )}
                 </div>
               </div>

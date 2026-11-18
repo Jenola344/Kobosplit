@@ -131,20 +131,53 @@ export default function CreatePoolPage() {
     ]
   );
 
-  return (
-    <div className="max-w-lg mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Create a Split Pool</h1>
+  const currencyButton = (value: "NGN" | "XOF", label: string) => (
+    <button
+      type="button"
+      onClick={() => setFiatCurrency(value)}
+      aria-pressed={fiatCurrency === value}
+      className={`min-h-[44px] flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+        fiatCurrency === value
+          ? "bg-[var(--primary)] text-[#1a1206] shadow-[0_10px_24px_-12px_var(--primary-glow)]"
+          : "bg-white/5 text-[var(--muted)] ring-1 ring-[var(--border)] hover:bg-white/10 hover:text-[var(--foreground)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+  return (
+    <div className="mx-auto max-w-lg">
+      <div className="animate-rise mb-6">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--primary)]">
+          New pool
+        </p>
+        <h1 className="mt-1 text-3xl font-extrabold tracking-tight">
+          Create a Split Pool
+        </h1>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Set the target, point it at a vendor&apos;s Lightning address, and
+          share the link with your group.
+        </p>
+      </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="card animate-rise space-y-5 p-5 sm:p-6"
+        style={{ animationDelay: "90ms" }}
+      >
         {/* Title */}
         <div>
-          <label className="block text-sm font-medium mb-1">Pool Title *</label>
+          <label htmlFor="pool-title" className="mb-1.5 block text-sm font-medium">
+            Pool Title <span className="text-[var(--primary)]">*</span>
+          </label>
           <input
+            id="pool-title"
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g., Hostel Generator Fuel Split"
-            className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="field"
             required
             maxLength={100}
           />
@@ -152,76 +185,60 @@ export default function CreatePoolPage() {
 
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium mb-1">
+          <label htmlFor="pool-description" className="mb-1.5 block text-sm font-medium">
             Description{" "}
-            <span className="text-[var(--muted)] font-normal">(optional)</span>
+            <span className="font-normal text-[var(--muted)]">(optional)</span>
           </label>
           <textarea
+            id="pool-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What is this split for?"
-            className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none"
+            className="field min-h-[80px] resize-none"
             maxLength={500}
           />
         </div>
 
         {/* Currency Toggle */}
         <div>
-          <label className="block text-sm font-medium mb-1">Currency</label>
+          <span className="mb-1.5 block text-sm font-medium">Currency</span>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setFiatCurrency("NGN")}
-              className={`px-4 py-2 rounded-lg text-sm font-medium min-h-[44px] transition-colors ${
-                fiatCurrency === "NGN"
-                  ? "bg-[var(--primary)] text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              🇳🇬 NGN (Naira)
-            </button>
-            <button
-              type="button"
-              onClick={() => setFiatCurrency("XOF")}
-              className={`px-4 py-2 rounded-lg text-sm font-medium min-h-[44px] transition-colors ${
-                fiatCurrency === "XOF"
-                  ? "bg-[var(--primary)] text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              🇸🇳 XOF (CFA Franc)
-            </button>
+            {currencyButton("NGN", "🇳🇬 NGN (Naira)")}
+            {currencyButton("XOF", "🇸🇳 XOF (CFA Franc)")}
           </div>
         </div>
 
         {/* Target Amount */}
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-sm font-medium">Target Amount *</label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="pool-amount" className="text-sm font-medium">
+              Target Amount <span className="text-[var(--primary)]">*</span>
+            </label>
             <button
               type="button"
               onClick={() => setIsFiatMode(!isFiatMode)}
-              className="text-xs text-[var(--primary)] hover:underline font-medium"
+              className="text-xs font-medium text-[var(--primary)] transition-opacity hover:opacity-80 hover:underline"
             >
               Switch to {isFiatMode ? "Sats" : fiatCurrency}
             </button>
           </div>
           <div className="relative">
             <input
+              id="pool-amount"
               type="number"
               value={amountInput}
               onChange={(e) => setAmountInput(e.target.value)}
               placeholder={isFiatMode ? `Amount in ${fiatCurrency}` : "Amount in sats"}
-              className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] pr-20"
+              className="field num pr-20"
               required
               min={1}
             />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--muted)]">
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-[var(--muted)]">
               {isFiatMode ? fiatCurrency : "sats"}
             </span>
           </div>
           {convertedDisplay && (
-            <p className="text-xs text-[var(--muted)] mt-1">
+            <p className="num mt-1.5 text-xs text-[var(--muted)]">
               {convertedDisplay}
               {rateIsFallback && (
                 <span className="text-[var(--warning)]"> · estimated rate</span>
@@ -232,36 +249,35 @@ export default function CreatePoolPage() {
 
         {/* Vendor Lightning Address */}
         <div>
-          <label className="block text-sm font-medium mb-1">
-            Vendor Payment Address *
+          <label htmlFor="vendor-address" className="mb-1.5 block text-sm font-medium">
+            Vendor Payment Address <span className="text-[var(--primary)]">*</span>
           </label>
           <input
+            id="vendor-address"
             type="text"
             value={vendorLnAddress}
             onChange={(e) => setVendorLnAddress(e.target.value)}
             placeholder="e.g., vendor@blink.sv"
-            className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="field font-mono"
             required
           />
-          <p className="text-xs text-[var(--muted)] mt-1">
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
             The Lightning Address where collected funds will be sent
           </p>
         </div>
 
         {/* Demo Wallet Toggle */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <label className="flex items-start gap-3 cursor-pointer">
+        <div className="rounded-xl border border-[var(--primary)]/25 bg-[var(--primary)]/[0.07] p-4">
+          <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
               checked={useDemoWallet}
               onChange={(e) => setUseDemoWallet(e.target.checked)}
-              className="mt-0.5 w-5 h-5 accent-[var(--primary)]"
+              className="mt-0.5 h-5 w-5 accent-[var(--primary)]"
             />
             <div>
-              <span className="font-medium text-sm">
-                🧪 Use Demo Testnet Wallet
-              </span>
-              <p className="text-xs text-[var(--muted)] mt-1">
+              <span className="text-sm font-medium">🧪 Use Demo Testnet Wallet</span>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
                 Perfect for testing! Uses a pre-configured testnet wallet so you
                 can try KoboSplit without setting up your own Lightning node.
               </p>
@@ -271,19 +287,20 @@ export default function CreatePoolPage() {
 
         {/* NWC URI (hidden if demo mode) */}
         {!useDemoWallet && (
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Wallet Connection URI *
+          <div className="animate-rise">
+            <label htmlFor="nwc-uri" className="mb-1.5 block text-sm font-medium">
+              Wallet Connection URI <span className="text-[var(--primary)]">*</span>
             </label>
             <input
+              id="nwc-uri"
               type="password"
               value={nwcUri}
               onChange={(e) => setNwcUri(e.target.value)}
               placeholder="nostr+walletconnect://..."
-              className="w-full border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] font-mono text-xs"
+              className="field font-mono text-xs"
               required={!useDemoWallet}
             />
-            <p className="text-xs text-[var(--muted)] mt-1">
+            <p className="mt-1.5 text-xs text-[var(--muted)]">
               Your NWC connection string from Alby Hub or any NWC-compatible
               wallet. Encrypted at rest — never stored in plain text.
             </p>
@@ -292,21 +309,24 @@ export default function CreatePoolPage() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          <div className="animate-rise rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {error}
           </div>
         )}
 
         {/* Submit */}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-[var(--primary)] hover:bg-[var(--primary-dark)] disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-base transition-colors min-h-[44px]"
-        >
-          {loading ? "Creating Pool..." : "⚡ Create Split Pool"}
+        <button type="submit" disabled={loading} className="btn btn-primary w-full text-base">
+          {loading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1a1206]/30 border-t-[#1a1206]" />
+              Creating Pool...
+            </>
+          ) : (
+            "⚡ Create Split Pool"
+          )}
         </button>
 
-        <p className="text-xs text-[var(--muted)] text-center">
+        <p className="text-center text-xs leading-relaxed text-[var(--muted)]">
           An organizer key is created with the pool and kept on this device. It is
           the only way to record a payout if a release is interrupted.
         </p>

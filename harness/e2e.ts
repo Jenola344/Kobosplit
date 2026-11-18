@@ -255,13 +255,19 @@ async function runScenario(): Promise<void> {
     assert.equal(res.body.poolStatus, "OPEN", "pool should stay OPEN below target");
   });
 
-  await check("pool detail shows the contribution with a receipt id", async () => {
+  await check("pool detail publishes an auditable receipt for the contribution", async () => {
     const res = await poolDetail(poolA);
     assert.equal(res.status, 200);
     assert.equal(res.body.collectedSats, 6_000);
     assert.equal(res.body.status, "OPEN");
     assert.equal(res.body.contributions.length, 1);
-    assert.ok(res.body.contributions[0].receiptId, "contribution should expose a receipt id");
+
+    // The receipt must be enough for a visitor to audit it themselves: the full
+    // preimage plus the payment hash it has to hash to.
+    const receipt = res.body.contributions[0];
+    assert.ok(/^[0-9a-f]{64}$/.test(receipt.preimage), "receipt should expose the 32-byte preimage");
+    assert.equal(sha256(receipt.preimage), receipt.paymentHash, "receipt preimage must hash to its payment hash");
+    assert.equal(receipt.preimage, firstPreimage, "ledger receipt should be the preimage that settled the contribution");
     const serialised = JSON.stringify(res.body);
     assert.ok(!serialised.includes("nostr+walletconnect"), "NWC URI leaked from the pool endpoint");
     assert.ok(!("encryptedNwcUri" in res.body), "ciphertext leaked from the pool endpoint");

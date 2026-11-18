@@ -32,11 +32,11 @@ async function getPools(): Promise<PoolWithContributions[]> {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    OPEN: "bg-blue-100 text-blue-800",
-    FUNDED: "bg-yellow-100 text-yellow-800",
-    RELEASING: "bg-yellow-100 text-yellow-800",
-    RELEASED: "bg-green-100 text-green-800",
-    REFUNDED: "bg-gray-100 text-gray-800",
+    OPEN: "bg-sky-400/10 text-sky-300 ring-sky-400/30",
+    FUNDED: "bg-amber-400/10 text-amber-300 ring-amber-400/30",
+    RELEASING: "bg-amber-400/10 text-amber-300 ring-amber-400/30 animate-pulse",
+    RELEASED: "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30",
+    REFUNDED: "bg-white/5 text-[var(--muted)] ring-white/15",
   };
   const labels: Record<string, string> = {
     OPEN: "Accepting Contributions",
@@ -47,14 +47,22 @@ function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span
-      className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${colors[status] || "bg-gray-100 text-gray-800"}`}
+      className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${
+        colors[status] || "bg-white/5 text-[var(--muted)] ring-white/15"
+      }`}
     >
       {labels[status] || status}
     </span>
   );
 }
 
-async function PoolCard({ pool }: { pool: PoolWithContributions }) {
+async function PoolCard({
+  pool,
+  index,
+}: {
+  pool: PoolWithContributions;
+  index: number;
+}) {
   const collectedSats = pool.contributions.reduce(
     (sum, c) => sum + c.amountSats,
     0
@@ -81,39 +89,40 @@ async function PoolCard({ pool }: { pool: PoolWithContributions }) {
   return (
     <Link
       href={`/pool/${pool.id}`}
-      className="block border border-[var(--border)] rounded-xl p-5 hover:shadow-md transition-shadow bg-white"
+      className="card card-hover animate-rise block p-5"
+      style={{ animationDelay: `${index * 70}ms` }}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <h3 className="font-semibold text-base leading-tight">{pool.title}</h3>
+      <div className="mb-3 flex flex-col-reverse items-start gap-2 sm:flex-row sm:justify-between sm:gap-3">
+        <h3 className="text-base font-semibold leading-tight tracking-tight text-balance">
+          {pool.title}
+        </h3>
         <StatusBadge status={pool.status} />
       </div>
 
       {pool.description && (
-        <p className="text-sm text-[var(--muted)] mb-4 line-clamp-2">
+        <p className="mb-4 line-clamp-2 text-sm text-[var(--muted)]">
           {pool.description}
         </p>
       )}
 
       {/* Progress bar */}
       <div className="mb-2">
-        <div className="flex justify-between text-xs text-[var(--muted)] mb-1">
+        <div className="num mb-1.5 flex justify-between text-xs text-[var(--muted)]">
           <span>
             {collectedSats.toLocaleString()} / {pool.targetSats.toLocaleString()}{" "}
             sats
           </span>
-          <span>{progress}%</span>
+          <span className="font-semibold text-[var(--foreground)]">
+            {progress}%
+          </span>
         </div>
-        <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+        <div className="track">
           <div
-            className={`h-full rounded-full transition-all ${
-              progress >= 100
-                ? "bg-[var(--success)]"
-                : "bg-[var(--primary)]"
-            }`}
+            className={`fill ${progress >= 100 ? "fill-done" : ""}`}
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-[var(--muted)] mt-1">
+        <div className="num mt-1.5 flex justify-between text-xs text-[var(--muted)]">
           <span>
             ~{symbol}
             {collectedFiat.toLocaleString()}
@@ -125,9 +134,11 @@ async function PoolCard({ pool }: { pool: PoolWithContributions }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between mt-3 text-xs text-[var(--muted)]">
-        <span>👥 {pool.contributions.length} contributors</span>
-        <span>⚡ {pool.vendorLnAddress}</span>
+      <div className="mt-4 flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
+        <span className="num">👥 {pool.contributions.length} contributors</span>
+        <span className="truncate font-mono text-[11px]">
+          ⚡ {pool.vendorLnAddress}
+        </span>
       </div>
     </Link>
   );
@@ -136,44 +147,106 @@ async function PoolCard({ pool }: { pool: PoolWithContributions }) {
 export default async function HomePage() {
   const [pools, rates] = await Promise.all([getPools(), getRateInfo("NGN")]);
 
+  const totalCollected = pools.reduce(
+    (sum, pool) =>
+      sum +
+      pool.contributions.reduce((poolSum, c) => poolSum + c.amountSats, 0),
+    0
+  );
+
   return (
     <div>
       {/* Hero */}
-      <section className="text-center py-10">
-        <h1 className="text-3xl sm:text-4xl font-bold mb-3">
-          ⚡ Kobo<span className="text-[var(--primary)]">Split</span>
-        </h1>
-        <p className="text-lg text-[var(--muted)] max-w-lg mx-auto mb-6">
-          Split costs instantly with your group using Bitcoin Lightning.
-          Non-custodial, no sign-up, no fees beyond the network.
-        </p>
-        <Link
-          href="/create"
-          className="inline-flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-dark)] text-white font-semibold px-6 py-3 rounded-xl text-base transition-colors min-h-[44px]"
+      <section className="relative pb-12 pt-4 text-center sm:pt-10">
+        <div
+          className="animate-rise inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--muted)]"
         >
-          + Create New Split Pool
-        </Link>
+          <span className="pulse-dot" />
+          Non-custodial escrow on Lightning
+        </div>
+
+        <h1
+          className="animate-rise mt-6 text-4xl font-extrabold leading-[1.08] tracking-tight text-balance sm:text-5xl"
+          style={{ animationDelay: "90ms" }}
+        >
+          Split costs with your group{" "}
+          <span className="text-gradient">at lightning speed</span>
+        </h1>
+
+        <p
+          className="animate-rise mx-auto mt-4 max-w-xl text-base text-[var(--muted)] sm:text-lg"
+          style={{ animationDelay: "170ms" }}
+        >
+          KoboSplit pools contributions into a non-custodial escrow, verifies
+          every payment, then releases to the vendor on Lightning.
+        </p>
+
+        <div
+          className="animate-rise mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
+          style={{ animationDelay: "250ms" }}
+        >
+          <Link href="/create" className="btn btn-primary w-full text-base sm:w-auto">
+            ⚡ Create New Split Pool
+          </Link>
+          <a href="#pools" className="btn btn-ghost w-full text-sm sm:w-auto">
+            Browse pools
+          </a>
+        </div>
+
+        <dl
+          className="animate-rise mx-auto mt-10 grid max-w-md grid-cols-2 gap-3"
+          style={{ animationDelay: "330ms" }}
+        >
+          <div className="card px-4 py-3">
+            <dt className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+              Open pools
+            </dt>
+            <dd className="num mt-1 text-2xl font-bold">
+              {pools.filter((p) => p.status === "OPEN").length}
+            </dd>
+          </div>
+          <div className="card px-4 py-3">
+            <dt className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+              Sats pooled
+            </dt>
+            <dd className="num mt-1 text-2xl font-bold text-[var(--primary)]">
+              {totalCollected.toLocaleString()}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       {/* Pool list */}
-      <section>
-        <h2 className="text-xl font-semibold mb-4">Active Pools</h2>
+      <section id="pools" className="scroll-mt-24">
+        <div className="mb-4 flex items-end justify-between gap-3">
+          <h2 className="text-xl font-semibold tracking-tight">Active Pools</h2>
+          <span className="text-xs text-[var(--muted)]">
+            {pools.length} total
+          </span>
+        </div>
+
         {rates.isFallback && (
-          <p className="text-xs text-[var(--warning)] mb-3">
-            ⚠️ Live exchange rate unavailable — NGN and XOF amounts below are built-in estimates.
+          <p className="mb-3 inline-flex items-start gap-2 rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-light)] px-3 py-2 text-xs text-[var(--warning)]">
+            ⚠️ Live exchange rate unavailable — NGN and XOF amounts below are
+            built-in estimates.
           </p>
         )}
+
         {pools.length === 0 ? (
-          <div className="text-center py-12 text-[var(--muted)]">
-            <p className="text-lg mb-2">No pools yet</p>
-            <p className="text-sm">
-              Create the first split pool to get started!
+          <div className="card animate-rise flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="text-4xl">⚡</span>
+            <p className="text-lg font-medium">No pools yet</p>
+            <p className="max-w-xs text-sm text-[var(--muted)]">
+              Create the first split pool and share the link with your group.
             </p>
+            <Link href="/create" className="btn btn-primary mt-2 text-sm">
+              + Create a pool
+            </Link>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            {pools.map((pool) => (
-              <PoolCard key={pool.id} pool={pool} />
+            {pools.map((pool, i) => (
+              <PoolCard key={pool.id} pool={pool} index={i} />
             ))}
           </div>
         )}

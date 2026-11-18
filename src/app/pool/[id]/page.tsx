@@ -17,6 +17,7 @@ async function getPoolData(id: string) {
           id: true,
           nickname: true,
           amountSats: true,
+          paymentHash: true,
           preimage: true,
           createdAt: true,
         },
@@ -73,7 +74,11 @@ async function getPoolData(id: string) {
       id: c.id,
       nickname: c.nickname,
       amountSats: c.amountSats,
-      receiptId: c.preimage ? c.preimage.slice(0, 12) + "..." : null,
+      // The full preimage is published so anyone can re-derive sha256(preimage)
+      // and check it against the invoice's payment hash. It is a receipt, not a
+      // spending key.
+      paymentHash: c.paymentHash,
+      preimage: c.preimage,
       createdAt: c.createdAt.toISOString(),
     })),
   };
