@@ -1,7 +1,6 @@
-import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
-
-const prisma = new PrismaClient();
+// Same client the app uses, so seeding a hosted libSQL database works too.
+import { prisma } from "../src/lib/db";
 
 /**
  * Seed contributions need real proofs: sha256(preimage) must equal paymentHash,

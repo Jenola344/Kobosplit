@@ -151,6 +151,37 @@ npm run mock:pay -- <paymentHash>
 
 `NWC_MOCK=1` throws in a production build, so a real deployment can never fake a payout.
 
+## ▲ Deploying to Vercel
+
+Vercel functions have a read-only filesystem and one instance per request, so the local SQLite file cannot back a deployment — without a hosted database every page returns `500` with `Error code 14: Unable to open the database file`.
+
+KoboSplit uses [Turso](https://turso.tech) (hosted libSQL, same SQLite dialect, free tier):
+
+```bash
+turso db create kobosplit
+turso db show kobosplit --url        # libsql://kobosplit-<org>.turso.io
+turso db tokens create kobosplit     # copy the token
+```
+
+1. Add the environment variables in Vercel (Production scope):
+
+| Variable | Value |
+|---|---|
+| `TURSO_DATABASE_URL` | `libsql://kobosplit-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | the token from `turso db tokens create` |
+| `DATABASE_URL` | `file:./dev.db` — unused at runtime, but `prisma generate` requires it |
+| `ENCRYPTION_SECRET` | `openssl rand -hex 32` (must match the one used to seed) |
+| `DEMO_NWC_URI` | optional, enables the 1-click demo wallet |
+
+2. Create the tables and seed the demo pools from your machine, using the same values:
+
+```bash
+TURSO_DATABASE_URL="libsql://..." TURSO_AUTH_TOKEN="..." npm run db:push:turso
+TURSO_DATABASE_URL="libsql://..." TURSO_AUTH_TOKEN="..." npm run db:seed
+```
+
+The runtime picks the adapter from `TURSO_DATABASE_URL`; when it is unset, `npm run dev`, the seed script and the mock harness keep using `prisma/dev.db` exactly as before. `NWC_MOCK=1` still throws in a production build.
+
 ## 📁 Project Structure
 
 ```
