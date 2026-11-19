@@ -2,8 +2,10 @@
  * Provisions the hosted database during a deploy.
  *
  * `next build` runs it with --seed-if-empty --tolerant so a deployment sets up
- * its own database and never fails because the database is unreachable; the
- * runtime reports the real problem through /api/health instead.
+ * its own database and never fails because the database is unreachable. The
+ * outcome is written to public/deploy-status.json (served at
+ * /deploy-status.json) because hosting build logs are not always reachable,
+ * and /api/health reports the runtime view.
  *
  * Three cases, picked from the configured URL:
  *   - a `file:` path is the local database, so there is nothing to do;
@@ -13,10 +15,10 @@
  *   - libSQL/Turso: Prisma Migrate cannot reach it over HTTP, so apply the SQL
  *     that describes the schema with the libSQL client directly.
  *
- * Manual use: npm run db:push:turso (or db:provision)
+ * Manual use: npm run db:provision (or db:push:turso)
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createClient } from "@libsql/client";
 import {
   resolveDatabaseTarget,
@@ -27,6 +29,7 @@ const args = new Set(process.argv.slice(2));
 const flag = (name: string) => args.has(`--${name}`);
 
 const POSTGRES_SCHEMA = "prisma/postgres.generated.prisma";
+const STATUS_FILE = "public/deploy-status.json";
 
 function binPath(name: string): string {
   return process.platform === "win32"
@@ -34,8 +37,29 @@ function binPath(name: string): string {
     : `node_modules/.bin/${name}`;
 }
 
-function run(name: string, argv: string[], env = process.env): void {
-  execFileSync(binPath(name), argv, { stdio: "inherit", env });
+function run(name: string, argv: string[]): void {
+  execFileSync(binPath(name), argv, { stdio: "inherit" });
+}
+
+function writeStatus(status: Record<string, unknown>): void {
+  const target = resolveDatabaseTarget();
+  const payload = {
+    at: new Date().toISOString(),
+    ...status,
+    databaseKind: target.kind,
+    urlSource: target.source,
+    urlProtocol: target.protocol,
+    // Presence only; never the values.
+    encryptionSecretSet: Boolean(process.env.ENCRYPTION_SECRET),
+    demoWalletConfigured: Boolean(process.env.DEMO_NWC_URI),
+  };
+
+  try {
+    mkdirSync("public", { recursive: true });
+    writeFileSync(STATUS_FILE, `${JSON.stringify(payload, null, 2)}\n`);
+  } catch (error) {
+    console.error("[db] Could not write the deployment status file:", error);
+  }
 }
 
 function schemaSql(): string {
@@ -51,14 +75,11 @@ function schemaSql(): string {
       "prisma/schema.prisma",
       "--script",
     ],
-    { encoding: "utf8", env: { ...process.env, DATABASE_URL: "file:./schema-diff.db" } }
+    {
+      encoding: "utf8",
+      env: { ...process.env, DATABASE_URL: "file:./schema-diff.db" },
+    }
   );
-}
-
-async function hasPools(client: {
-  pool: { count(): Promise<number> };
-}): Promise<number> {
-  return client.pool.count();
 }
 
 async function seedIfEmpty(countPools: () => Promise<number>): Promise<void> {
@@ -91,7 +112,7 @@ async function provisionPostgres(): Promise<void> {
   const { PrismaClient } = await import("@prisma/client");
   const client = new PrismaClient();
   try {
-    await seedIfEmpty(() => hasPools(client));
+    await seedIfEmpty(() => client.pool.count());
   } finally {
     await client.$disconnect();
   }
@@ -142,23 +163,27 @@ async function main(): Promise<void> {
 
   if (target.kind === "postgres") {
     await provisionPostgres();
+    writeStatus({ ok: true, step: "schema", message: "Postgres schema is up to date" });
     return;
   }
 
   if (target.kind === "libsql") {
     await provisionLibsql(target);
+    writeStatus({ ok: true, step: "schema", message: "libSQL schema is up to date" });
     return;
   }
 
-  console.log(
-    `[db] Nothing to provision (${
-      target.source ? `${target.source} is ${target.protocol ?? "unusable"}` : "no database URL"
-    }).`
-  );
+  const message = `nothing to provision (${
+    target.source ? `${target.source} is ${target.protocol ?? "unusable"}` : "no database URL"
+  })`;
+  console.log(`[db] ${message}`);
+  writeStatus({ ok: true, step: "skipped", message });
 }
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
+  writeStatus({ ok: false, step: "provisioning", message });
+
   if (flag("tolerant")) {
     // A build must not fail because the database is briefly unreachable; the
     // runtime reports the real problem through /api/health.

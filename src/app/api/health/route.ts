@@ -24,6 +24,8 @@ function describeDatabase() {
     urlSource: target.source,
     urlProtocol: target.protocol,
     tursoAuthTokenSet: Boolean(process.env.TURSO_AUTH_TOKEN),
+    encryptionSecretSet: Boolean(process.env.ENCRYPTION_SECRET),
+    demoWalletConfigured: Boolean(process.env.DEMO_NWC_URI),
   };
 }
 

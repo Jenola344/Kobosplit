@@ -11,3 +11,4 @@ dist/
 
 # Derived at build time from prisma/schema.prisma
 prisma/postgres.generated.prisma
+public/deploy-status.json
