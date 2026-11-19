@@ -155,7 +155,9 @@ npm run mock:pay -- <paymentHash>
 
 Vercel functions have a read-only filesystem and one instance per request, so the local SQLite file cannot back a deployment — without a hosted database every page returns `500` with `Error code 14: Unable to open the database file`.
 
-KoboSplit uses [Turso](https://turso.tech) (hosted libSQL, same SQLite dialect, free tier):
+Postgres works out of the box: if `DATABASE_URL` is a `postgres://` URL (as Vercel/Neon integrations provide), the build derives a Postgres schema from `prisma/schema.prisma`, generates the client for it and runs `prisma db push`. Local development keeps using the SQLite file because that schema stays `sqlite`.
+
+Without Postgres, KoboSplit uses [Turso](https://turso.tech) (hosted libSQL, same SQLite dialect, free tier):
 
 ```bash
 turso db create kobosplit

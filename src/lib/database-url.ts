@@ -1,22 +1,32 @@
 /**
  * Where Prisma should connect.
  *
- * Local development uses the SQLite file in DATABASE_URL. A deployment needs a
- * hosted libSQL database instead, and a dashboard may expose that one URL under
- * either name, so TURSO_DATABASE_URL wins and DATABASE_URL is accepted too when
- * it already points at a networked libSQL server.
+ * Local development uses the SQLite file in DATABASE_URL. A deployment uses
+ * whatever hosted database the host provides, and its dashboard may expose that
+ * one URL under either name, so TURSO_DATABASE_URL wins and DATABASE_URL is
+ * accepted too.
  */
-const REMOTE_PROTOCOLS = ["libsql:", "https:", "http:", "wss:", "ws:"];
+const LIBSQL_PROTOCOLS = ["libsql:", "https:", "http:", "wss:", "ws:"];
+const POSTGRES_PROTOCOLS = ["postgres:", "postgresql:"];
+
+export type DatabaseKind = "sqlite" | "libsql" | "postgres" | "unsupported";
 
 export interface DatabaseTarget {
   /** The URL to connect with, once trimmed. */
   url: string | undefined;
-  /** True when the URL is a networked libSQL server rather than a local file. */
-  isRemote: boolean;
-  /** Lower-case URL scheme, e.g. "file:", "libsql:", "postgresql:". */
+  /** Lower-case URL scheme, e.g. "file:", "postgres:", "libsql:". */
   protocol: string | null;
   /** Which environment variable the URL came from. */
   source: "TURSO_DATABASE_URL" | "DATABASE_URL" | null;
+  kind: DatabaseKind;
+}
+
+function classify(protocol: string | null): DatabaseKind {
+  if (!protocol) return "unsupported";
+  if (protocol === "file:") return "sqlite";
+  if (LIBSQL_PROTOCOLS.includes(protocol)) return "libsql";
+  if (POSTGRES_PROTOCOLS.includes(protocol)) return "postgres";
+  return "unsupported";
 }
 
 export function resolveDatabaseTarget(): DatabaseTarget {
@@ -28,14 +38,11 @@ export function resolveDatabaseTarget(): DatabaseTarget {
   const raw = source ? process.env[source] : undefined;
   const url = raw?.trim() || undefined;
 
-  if (!url) return { url: undefined, isRemote: false, protocol: null, source };
+  if (!url) {
+    return { url: undefined, protocol: null, source, kind: "unsupported" };
+  }
 
   const protocol = /^[a-z][a-z0-9+.-]*:/i.exec(url)?.[0].toLowerCase() ?? null;
 
-  return {
-    url,
-    isRemote: protocol !== null && REMOTE_PROTOCOLS.includes(protocol),
-    protocol,
-    source,
-  };
+  return { url, protocol, source, kind: classify(protocol) };
 }

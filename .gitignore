@@ -8,3 +8,6 @@ prisma/dev.db-journal
 *.db-journal
 dist/
 *.tsbuildinfo
+
+# Derived at build time from prisma/schema.prisma
+prisma/postgres.generated.prisma

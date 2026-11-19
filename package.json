@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "tsx scripts/db-push.ts --if-missing --seed-if-empty --tolerant && next build",
+    "build": "tsx scripts/db-push.ts --seed-if-empty --tolerant && next build",
     "start": "next start",
     "lint": "next lint",
     "mock:wallet": "tsx harness/mock-wallet.ts",
@@ -12,6 +12,7 @@
     "e2e": "tsx harness/e2e.ts",
     "db:seed": "prisma db seed",
     "db:push:turso": "tsx scripts/db-push.ts",
+    "db:provision": "tsx scripts/db-push.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
