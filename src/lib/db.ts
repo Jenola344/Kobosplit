@@ -18,7 +18,15 @@ const globalForPrisma = globalThis as unknown as {
 function createPrismaClient(): PrismaClient {
   const url = process.env.TURSO_DATABASE_URL;
   // file: URLs are the local database; only a networked libSQL URL needs the adapter.
-  if (!url || /^file:/i.test(url)) return new PrismaClient();
+  if (!url || /^file:/i.test(url)) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[db] TURSO_DATABASE_URL is missing or a file: path, so Prisma is about to open local SQLite. " +
+          "A serverless deployment cannot open a local database file — set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN."
+      );
+    }
+    return new PrismaClient();
+  }
 
   return new PrismaClient({
     adapter: new PrismaLibSQL({
