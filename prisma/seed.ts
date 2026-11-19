@@ -1,6 +1,9 @@
 import crypto from "crypto";
-// Same client the app uses, so seeding a hosted libSQL database works too.
+// Same client the app uses, so seeding a hosted database works too.
 import { prisma } from "../src/lib/db";
+// Same encryption the app uses, including its key fallback when a deployment
+// has no ENCRYPTION_SECRET configured.
+import { encryptNwcUri } from "../src/lib/crypto";
 
 /**
  * Seed contributions need real proofs: sha256(preimage) must equal paymentHash,
@@ -17,21 +20,6 @@ function seedProof(seed: string): { preimage: string; paymentHash: string } {
     .update(Buffer.from(preimage, "hex"))
     .digest("hex");
   return { preimage, paymentHash };
-}
-
-// Replicate encryption logic for seed data
-function encryptNwcUri(plainUri: string): string {
-  const secret = process.env.ENCRYPTION_SECRET;
-  if (!secret || secret.length !== 64) {
-    throw new Error("ENCRYPTION_SECRET must be a 64-char hex string");
-  }
-  const key = Buffer.from(secret, "hex");
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  let encrypted = cipher.update(plainUri, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const authTag = cipher.getAuthTag();
-  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted}`;
 }
 
 async function main() {

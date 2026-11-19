@@ -1,22 +1,46 @@
 import crypto from "crypto";
+import { resolveDatabaseTarget } from "./database-url";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
+let warnedAboutDerivedKey = false;
+
 function getKey(): Buffer {
   const secret = process.env.ENCRYPTION_SECRET;
-  if (!secret) {
+  if (secret) {
+    if (secret.length !== 64 || !/^[0-9a-fA-F]+$/.test(secret)) {
+      throw new Error(
+        "ENCRYPTION_SECRET must be exactly 64 hex characters (32 bytes)."
+      );
+    }
+    return Buffer.from(secret, "hex");
+  }
+
+  // A deployment without ENCRYPTION_SECRET still has to encrypt and decrypt
+  // consistently, so derive one key from the database URL it already has
+  // instead of refusing to work. Set ENCRYPTION_SECRET when the values must
+  // survive losing that configuration; see the README.
+  const target = resolveDatabaseTarget();
+  if (!target.url) {
     throw new Error(
-      "ENCRYPTION_SECRET is not set. Provide a 64-character hex string (32 bytes)."
+      "ENCRYPTION_SECRET is not set and there is no database URL to derive a key from. " +
+        "Provide a 64-character hex string (32 bytes)."
     );
   }
-  if (secret.length !== 64 || !/^[0-9a-fA-F]+$/.test(secret)) {
-    throw new Error(
-      "ENCRYPTION_SECRET must be exactly 64 hex characters (32 bytes)."
+
+  if (!warnedAboutDerivedKey) {
+    warnedAboutDerivedKey = true;
+    console.warn(
+      "[crypto] ENCRYPTION_SECRET is not set; deriving the AES key from the database URL."
     );
   }
-  return Buffer.from(secret, "hex");
+
+  return crypto
+    .createHash("sha256")
+    .update(`kobosplit:nwc-encryption:${target.url}`)
+    .digest();
 }
 
 /**
