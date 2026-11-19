@@ -1,14 +1,24 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { resolveDatabaseTarget } from "@/lib/database-url";
 
 // Always executed at request time; nothing here can be prerendered.
 export const dynamic = "force-dynamic";
 
-function databaseMode(): string {
-  const url = process.env.TURSO_DATABASE_URL;
-  if (!url) return "sqlite-file (TURSO_DATABASE_URL is not set)";
-  if (/^file:/i.test(url)) return "sqlite-file (TURSO_DATABASE_URL is a file: path)";
-  return "libsql-remote";
+function describeDatabase() {
+  const target = resolveDatabaseTarget();
+  const mode = target.isRemote
+    ? "libsql-remote"
+    : target.url
+      ? `local-sqlite (${target.source} is a ${target.protocol ?? "scheme-less"} URL)`
+      : "local-sqlite (no database URL is set)";
+
+  return {
+    mode,
+    urlSource: target.source,
+    urlProtocol: target.protocol,
+    tursoAuthTokenSet: Boolean(process.env.TURSO_AUTH_TOKEN),
+  };
 }
 
 /**
@@ -20,10 +30,7 @@ function databaseMode(): string {
  * The auth token is never returned, only whether one is present.
  */
 export async function GET() {
-  const configuration = {
-    mode: databaseMode(),
-    tursoAuthTokenSet: Boolean(process.env.TURSO_AUTH_TOKEN),
-  };
+  const configuration = describeDatabase();
 
   try {
     const [poolCount, contributionCount] = await Promise.all([

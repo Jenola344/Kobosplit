@@ -13,6 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createClient } from "@libsql/client";
+import { resolveDatabaseTarget } from "../src/lib/database-url";
 
 const args = new Set(process.argv.slice(2));
 const flag = (name: string) => args.has(`--${name}`);
@@ -24,6 +25,10 @@ function binPath(name: string): string {
 }
 
 function schemaSql(): string {
+  // `migrate diff` only reads the schema, but it still validates the datasource
+  // env var, which rejects a libsql:// URL under the sqlite provider.
+  const env = { ...process.env, DATABASE_URL: "file:./schema-diff.db" };
+
   return execFileSync(
     binPath("prisma"),
     [
@@ -34,17 +39,22 @@ function schemaSql(): string {
       "prisma/schema.prisma",
       "--script",
     ],
-    { encoding: "utf8" }
+    { encoding: "utf8", env }
   );
 }
 
 async function main() {
-  const url = process.env.TURSO_DATABASE_URL;
+  const target = resolveDatabaseTarget();
   // file: URLs are the local database; only a networked libSQL URL needs this.
-  if (!url || /^file:/i.test(url)) {
-    console.log("[db] No hosted database configured; nothing to provision.");
+  if (!target.isRemote || !target.url) {
+    console.log(
+      `[db] No hosted libSQL database configured (${
+        target.source ? `${target.source} is ${target.protocol ?? "unusable"}` : "no database URL"
+      }); nothing to provision.`
+    );
     return;
   }
+  const url = target.url;
 
   const client = createClient({
     url,

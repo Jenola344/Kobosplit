@@ -173,6 +173,8 @@ turso db tokens create kobosplit     # copy the token
 | `ENCRYPTION_SECRET` | `openssl rand -hex 32` (must match the one used to seed) |
 | `DEMO_NWC_URI` | optional, enables the 1-click demo wallet |
 
+Either name works: if `DATABASE_URL` already holds a `libsql://` URL, the app connects with it instead of `file:`.
+
 2. Redeploy. `npm run build` runs `scripts/db-push.ts --if-missing --seed-if-empty --tolerant`, so the deploy creates the tables on an empty database and seeds the two demo pools itself. It never fails the build when the database is unreachable; open `/api/health` to see the database mode and the real error instead of Next's "server-side exception" digest.
 
 You can still do it by hand, which is useful before a first deploy:
