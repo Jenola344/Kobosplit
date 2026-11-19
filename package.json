@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "tsx scripts/db-push.ts --if-missing --seed-if-empty --tolerant && next build",
     "start": "next start",
     "lint": "next lint",
     "mock:wallet": "tsx harness/mock-wallet.ts",
